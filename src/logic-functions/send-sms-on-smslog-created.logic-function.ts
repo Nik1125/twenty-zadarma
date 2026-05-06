@@ -1,0 +1,152 @@
+import { defineLogicFunction } from 'twenty-sdk/define';
+import {
+  type DatabaseEventPayload,
+  type ObjectRecordCreateEvent,
+} from 'twenty-sdk/logic-function';
+import { CoreApiClient } from 'twenty-client-sdk/core';
+
+import { signZadarmaRequest } from 'src/modules/zadarma/connector/sign-request';
+import { normalizePhone } from 'src/modules/zadarma/utils/normalize-phone';
+
+// Trigger: when a manager creates an outbound smsLog through Twenty's standard
+// UI (`+ New SMS log` on a Person card), this hook picks it up and actually
+// fires the SMS through Zadarma's /v1/sms/send/, then updates the record with
+// the result (status SUCCESS / FAILED, cost, error message).
+//
+// Why a hook instead of a frontComponent send button: Twenty 2.2 Remote DOM
+// doesn't reliably propagate `<input>` value into the worker-side handler
+// (target.value comes back empty), so we delegate text capture to Twenty's
+// native record-create form where inputs work natively.
+//
+// To trigger this hook a record must be created with: direction='OUT',
+// status='PENDING', body filled, clientNumber filled (E.164 without `+`),
+// ourNumber filled (your verified Zadarma DID).
+
+type SmsLogAfter = {
+  id?: string;
+  direction?: 'IN' | 'OUT' | null;
+  status?: 'SUCCESS' | 'PENDING' | 'FAILED' | null;
+  body?: string | null;
+  clientNumber?: string | null;
+  ourNumber?: string | null;
+};
+
+type ZadarmaSmsSendResponse = {
+  status?: 'success' | 'error';
+  cost?: number;
+  currency?: string;
+  message?: string;
+};
+
+const handler = async (
+  event: DatabaseEventPayload<ObjectRecordCreateEvent<SmsLogAfter>>,
+) => {
+  const after = event.properties?.after;
+  const smsLogId = event.recordId;
+  if (!after || !smsLogId) return { ok: true, skipped: 'no record' };
+
+  // Only handle records the manager wants us to send.
+  if (after.direction !== 'OUT' || after.status !== 'PENDING') {
+    return { ok: true, skipped: 'not OUT/PENDING' };
+  }
+
+  const number = normalizePhone(after.clientNumber);
+  const ourNumber = normalizePhone(after.ourNumber);
+  const message = after.body;
+
+  const userKey = process.env.ZADARMA_USER_KEY;
+  const secret = process.env.ZADARMA_SECRET;
+
+  const client = new CoreApiClient();
+
+  if (!number || !ourNumber || !message) {
+    await client.mutation({
+      updateSmsLog: {
+        __args: {
+          id: smsLogId,
+          data: {
+            status: 'FAILED',
+            errorMessage: 'Missing required fields (clientNumber/ourNumber/body)',
+          },
+        },
+        id: true,
+      },
+    });
+    return { ok: false, error: 'missing fields' };
+  }
+
+  if (!userKey || !secret) {
+    await client.mutation({
+      updateSmsLog: {
+        __args: {
+          id: smsLogId,
+          data: {
+            status: 'FAILED',
+            errorMessage: 'ZADARMA_USER_KEY/SECRET not configured',
+          },
+        },
+        id: true,
+      },
+    });
+    return { ok: false, error: 'config error' };
+  }
+
+  const signed = signZadarmaRequest({
+    method: '/v1/sms/send/',
+    params: { number, message, caller_id: ourNumber },
+    userKey,
+    secret,
+  });
+
+  const response = await fetch(signed.url, {
+    method: 'POST',
+    headers: signed.headers,
+    body: signed.body,
+  });
+  const data = (await response.json()) as ZadarmaSmsSendResponse;
+  const isSuccess = data.status === 'success';
+
+  await client.mutation({
+    updateSmsLog: {
+      __args: {
+        id: smsLogId,
+        data: {
+          status: isSuccess ? 'SUCCESS' : 'FAILED',
+          errorMessage: isSuccess ? null : (data.message ?? 'Send failed'),
+          ...(isSuccess && data.cost !== undefined && data.currency
+            ? {
+                cost: {
+                  amountMicros: Math.round(data.cost * 1_000_000),
+                  currencyCode: data.currency,
+                },
+              }
+            : {}),
+        },
+      },
+      id: true,
+    },
+  });
+
+  console.log(
+    `[send-sms-on-smslog-created] smsLog=${smsLogId} number=${number} status=${data.status}`,
+  );
+
+  return {
+    ok: isSuccess,
+    smsLogId,
+    zadarmaStatus: data.status,
+    zadarmaMessage: data.message,
+  };
+};
+
+export default defineLogicFunction({
+  universalIdentifier: '0e9edd4a-fd23-49e3-85da-86bb706f0716',
+  name: 'send-sms-on-smslog-created',
+  description:
+    'When an outbound smsLog with status=PENDING is created via Twenty UI, send the SMS through Zadarma and update the record with the result.',
+  timeoutSeconds: 30,
+  handler,
+  databaseEventTriggerSettings: {
+    eventName: 'smsLog.created',
+  },
+});

@@ -1,13 +1,33 @@
 {
   "name": "twenty-zadarma",
-  "version": "0.1.0",
+  "version": "0.3.0",
+  "description": "Twenty CRM app for Zadarma telephony: inbound/outbound calls and SMS, transcripts, native send-from-Person panel, custom Settings UI",
   "license": "MIT",
+  "author": "Nikita Aleksyeyenko <aleksyeyenko.nikita@gmail.com>",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Nik1125/twenty-zadarma.git"
+  },
+  "homepage": "https://github.com/Nik1125/twenty-zadarma#readme",
+  "bugs": {
+    "url": "https://github.com/Nik1125/twenty-zadarma/issues"
+  },
   "engines": {
     "node": "^24.5.0",
     "npm": "please-use-yarn",
-    "yarn": ">=4.0.2"
+    "yarn": ">=4.0.2",
+    "twenty": ">=2.2.0"
   },
-  "keywords": [],
+  "keywords": [
+    "twenty",
+    "twenty-app",
+    "twenty-crm",
+    "zadarma",
+    "telephony",
+    "voip",
+    "sms",
+    "crm-integration"
+  ],
   "packageManager": "yarn@4.9.2",
   "scripts": {
     "twenty": "twenty",
