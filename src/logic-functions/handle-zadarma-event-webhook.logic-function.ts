@@ -2,6 +2,7 @@ import { defineLogicFunction } from 'twenty-sdk/define';
 import { type RoutePayload } from 'twenty-sdk/logic-function';
 import { CoreApiClient } from 'twenty-client-sdk/core';
 
+import { findPersonIdByClientNumber } from 'src/modules/zadarma/utils/find-person-by-phone';
 import {
   formatTranscript,
   type DialogTurn,
@@ -197,34 +198,6 @@ const handleSpeechRecognition = async (body: ZadarmaEventPayload & Record<string
     length: markdown.length,
     turns: turns.length,
   };
-};
-
-const findPersonIdByClientNumber = async (
-  client: CoreApiClient,
-  e164NoPlus: string,
-): Promise<string | null> => {
-  const exact = (await client.query({
-    people: {
-      __args: {
-        filter: { phones: { primaryPhoneNumber: { eq: e164NoPlus } } },
-      },
-      edges: { node: { id: true } },
-    },
-  })) as { people?: { edges?: Array<{ node: { id: string } }> } };
-  const exactHit = exact.people?.edges?.[0]?.node.id;
-  if (exactHit) return exactHit;
-
-  if (e164NoPlus.length < 9) return null;
-  const suffix = e164NoPlus.slice(-9);
-  const fuzzy = (await client.query({
-    people: {
-      __args: {
-        filter: { phones: { primaryPhoneNumber: { endsWith: suffix } } },
-      },
-      edges: { node: { id: true } },
-    },
-  })) as { people?: { edges?: Array<{ node: { id: string } }> } };
-  return fuzzy.people?.edges?.[0]?.node.id ?? null;
 };
 
 type ZadarmaInboundSmsResult = {
