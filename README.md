@@ -27,8 +27,10 @@ cd twenty-zadarma
 # 2. Install dependencies
 yarn install
 
-# 3. Point the Twenty CLI at your Twenty workspace
-cp .env.example .env   # then fill in TWENTY_API_URL and TWENTY_API_KEY
+# 3. Authenticate the Twenty CLI against your Twenty server
+yarn twenty remote add --as my-server \
+  --api-url https://your-twenty-host \
+  --api-key <api-key-from-Twenty-Settings-API-Keys>
 
 # 4. Build the app tarball and install it on your Twenty server
 yarn twenty build --tarball
