@@ -7,6 +7,7 @@ import {
   verifyZadarmaWebhook,
 } from 'src/modules/zadarma/connector/verify-webhook';
 import { signZadarmaRequest } from 'src/modules/zadarma/connector/sign-request';
+import { resolveCooldownUntilIso } from 'src/modules/zadarma/utils/active-call-lock';
 import { findPersonIdByClientNumber } from 'src/modules/zadarma/utils/find-person-by-phone';
 import { localToUtcIso } from 'src/modules/zadarma/utils/local-to-utc-iso';
 import { normalizePhone } from 'src/modules/zadarma/utils/normalize-phone';
@@ -73,6 +74,66 @@ const parseDuration = (d: string | number | undefined): number | undefined => {
   return Number.isFinite(n) ? n : undefined;
 };
 
+// Direction = first 4 chars of pbx_call_id (verified against CSV export +
+// live webhooks: `in_xxx` for inbound, `out_xxx` for outbound). The
+// `internal` field is unreliable. Shared between NOTIFY_END and the
+// active-call-lock NOTIFY_START path.
+const inferClientNumber = (
+  body: ZadarmaPbxEvent,
+): { callType: CallType; clientNumber: string | null } => {
+  const pbxCallId = body.pbx_call_id ?? '';
+  const callType: CallType = pbxCallId.startsWith('out_') ? 'OUT' : 'IN';
+  const callerNumber = normalizePhone(body.caller_id);
+  const calledNumber = normalizePhone(body.called_did);
+  const destinationNumber = normalizePhone(body.destination);
+  const clientNumber =
+    callType === 'IN'
+      ? callerNumber
+      : (destinationNumber ?? calledNumber);
+  return { callType, clientNumber };
+};
+
+// Writes the dial-lock signal to Person. The App is the publisher; consumers
+// (n8n / Retell / future click-to-call button) read activeCallStatus +
+// activeCallCooldownUntil. No-op if personId could not be resolved.
+const writePersonCalling = async (
+  client: CoreApiClient,
+  personId: string | null,
+) => {
+  if (!personId) return;
+  await client.mutation({
+    updatePerson: {
+      __args: {
+        id: personId,
+        data: {
+          activeCallStatus: 'CALLING',
+          activeCallCooldownUntil: null,
+        },
+      },
+      id: true,
+    },
+  });
+};
+
+const writePersonCooldown = async (
+  client: CoreApiClient,
+  personId: string | null,
+) => {
+  if (!personId) return;
+  await client.mutation({
+    updatePerson: {
+      __args: {
+        id: personId,
+        data: {
+          activeCallStatus: 'COOLDOWN',
+          activeCallCooldownUntil: resolveCooldownUntilIso(),
+        },
+      },
+      id: true,
+    },
+  });
+};
+
 const findCallLogIdByPbxCallId = async (
   client: CoreApiClient,
   pbxCallId: string,
@@ -94,23 +155,11 @@ const handleNotifyEnd = async (body: ZadarmaPbxEvent & Record<string, unknown>) 
     `[zadarma-pbx-webhook] NOTIFY_END raw body: ${JSON.stringify(body)}`,
   );
 
-  // Direction = first 4 chars of Zadarma's pbx_call_id (verified against CSV
-  // export and live webhooks: `in_xxx` for inbound, `out_xxx` for outbound).
-  // The `internal` field is unreliable (empty for cancelled/failed inbound
-  // and not a direction signal).
-  const callType: CallType = pbxCallId.startsWith('out_') ? 'OUT' : 'IN';
+  const { callType, clientNumber } = inferClientNumber(body);
   const callerNumber = normalizePhone(body.caller_id);
   const calledNumber = normalizePhone(body.called_did);
-  // Outbound from PBX terminal uses `destination` for the client number (CSV
-  // export confirms this). Falls back to called_did for older/edge cases.
-  const destinationNumber = normalizePhone(body.destination);
-
   // For inbound:  caller_id = client (external),  called_did = our DID
   // For outbound: caller_id = our DID/extension,  destination = client (external)
-  const clientNumber =
-    callType === 'IN'
-      ? callerNumber
-      : (destinationNumber ?? calledNumber);
   const ourNumber = callType === 'IN' ? calledNumber : callerNumber;
 
   const client = new CoreApiClient();
@@ -139,6 +188,7 @@ const handleNotifyEnd = async (body: ZadarmaPbxEvent & Record<string, unknown>) 
         id: true,
       },
     });
+    await writePersonCooldown(client, personId);
     console.log(
       `[zadarma-pbx-webhook] NOTIFY_END pbx=${pbxCallId} type=${callType} client=${clientNumber} dur=${duration} updated existing=${existingId} personId=${personId}`,
     );
@@ -165,10 +215,46 @@ const handleNotifyEnd = async (body: ZadarmaPbxEvent & Record<string, unknown>) 
     },
   })) as { createCallLog?: { id: string } };
   const callLogId = created.createCallLog?.id;
+  await writePersonCooldown(client, personId);
   console.log(
     `[zadarma-pbx-webhook] NOTIFY_END pbx=${pbxCallId} type=${callType} client=${clientNumber} dur=${duration} created=${callLogId} personId=${personId}`,
   );
   return { ok: true, action: 'created', callLogId, personId, matched: personId !== null };
+};
+
+// Active-call-lock publisher. Fires for NOTIFY_START (inbound), NOTIFY_OUT_START
+// (outbound), and NOTIFY_INTERNAL (when a call is routed to an extension —
+// some Zadarma deployments emit this in lieu of NOTIFY_START). Idempotent:
+// re-firing on the same Person while already in 'calling' is harmless.
+const handleNotifyStart = async (body: ZadarmaPbxEvent & Record<string, unknown>) => {
+  const eventType = body.event ?? '(unknown)';
+  console.log(
+    `[zadarma-pbx-webhook] ${eventType} raw body: ${JSON.stringify(body)}`,
+  );
+  const pbxCallId = body.pbx_call_id;
+  if (!pbxCallId) {
+    return { ok: false, action: 'start-no-pbx-id', event: eventType };
+  }
+
+  const { callType, clientNumber } = inferClientNumber(body);
+  if (!clientNumber) {
+    return { ok: true, action: 'start-no-client-number', event: eventType, callType };
+  }
+
+  const client = new CoreApiClient();
+  const personId = await findPersonIdByClientNumber(client, clientNumber);
+  if (!personId) {
+    console.log(
+      `[zadarma-pbx-webhook] ${eventType} pbx=${pbxCallId} type=${callType} client=${clientNumber} no person match — skip lock`,
+    );
+    return { ok: true, action: 'start-no-person-match', event: eventType };
+  }
+
+  await writePersonCalling(client, personId);
+  console.log(
+    `[zadarma-pbx-webhook] ${eventType} pbx=${pbxCallId} type=${callType} client=${clientNumber} personId=${personId} → activeCallStatus=calling`,
+  );
+  return { ok: true, action: 'start-lock-set', event: eventType, personId };
 };
 
 // On NOTIFY_RECORD, Zadarma supplies `call_id_with_rec` and we need to fetch
@@ -326,6 +412,13 @@ const handler = async (event: RoutePayload<ZadarmaPbxEvent>) => {
 
   if (eventType === 'NOTIFY_END' || eventType === 'NOTIFY_OUT_END') {
     return handleNotifyEnd(body);
+  }
+  if (
+    eventType === 'NOTIFY_START' ||
+    eventType === 'NOTIFY_OUT_START' ||
+    eventType === 'NOTIFY_INTERNAL'
+  ) {
+    return handleNotifyStart(body);
   }
   if (eventType === 'NOTIFY_RECORD') {
     return handleNotifyRecord(body);
