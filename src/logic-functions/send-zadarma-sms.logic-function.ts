@@ -5,6 +5,7 @@ import { CoreApiClient } from 'twenty-client-sdk/core';
 import { signZadarmaRequest } from 'src/modules/zadarma/connector/sign-request';
 import { findPersonIdByClientNumber } from 'src/modules/zadarma/utils/find-person-by-phone';
 import { normalizePhone } from 'src/modules/zadarma/utils/normalize-phone';
+import { updateLastContactedIfNewer } from 'src/modules/zadarma/utils/update-last-contacted';
 
 type SendSmsRequest = {
   // Required: client phone in any format — normalized to E.164 without '+'.
@@ -163,6 +164,15 @@ const innerHandler = async (
       id: true,
     },
   })) as { createSmsLog?: { id: string } };
+
+  // Stamp Person.lastContactedAt — done here (rather than via a smsLog.created
+  // DB-event trigger) because Twenty's migration rejects a second App-owned
+  // subscriber on the same event. The existing send-sms-on-smslog-created
+  // trigger covers Path 2 (manual UI create); this covers Path 1 (front-
+  // component / external API call going through this endpoint).
+  if (personId) {
+    await updateLastContactedIfNewer(client, personId, sentAt);
+  }
 
   console.log(
     `[send-zadarma-sms] number=${number} status=${data.status} smsLog=${created.createSmsLog?.id} personId=${personId}`,
