@@ -8,7 +8,14 @@ import {
 } from 'src/modules/zadarma/connector/verify-webhook';
 import { signZadarmaRequest } from 'src/modules/zadarma/connector/sign-request';
 import { findPersonIdByClientNumber } from 'src/modules/zadarma/utils/find-person-by-phone';
+import { localToUtcIso } from 'src/modules/zadarma/utils/local-to-utc-iso';
 import { normalizePhone } from 'src/modules/zadarma/utils/normalize-phone';
+
+// Zadarma's webhook payload uses the cabinet's display timezone for
+// `call_start`. Polish accounts default to Europe/Warsaw. If your account is
+// configured for a different cabinet timezone, override via the
+// ZADARMA_CABINET_TIMEZONE applicationVariable.
+const ZADARMA_CABINET_TZ = process.env.ZADARMA_CABINET_TIMEZONE || 'Europe/Warsaw';
 
 const REGISTERED_PATH = '/zadarma/pbx-webhook';
 
@@ -132,7 +139,7 @@ const handleNotifyEnd = async (body: ZadarmaPbxEvent & Record<string, unknown>) 
           name: `${callType} ${clientNumber ?? '?'}${body.call_start ? ' — ' + body.call_start : ''}`,
           pbxCallId,
           callType,
-          callStart: body.call_start ? new Date(body.call_start).toISOString() : undefined,
+          callStart: localToUtcIso(body.call_start, ZADARMA_CABINET_TZ) ?? undefined,
           duration,
           disposition,
           clientNumber: clientNumber ?? '',
