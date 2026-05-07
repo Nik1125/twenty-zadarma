@@ -72,6 +72,47 @@ If `Person` cannot be resolved by phone (orphan log), the lock is silently skipp
 
 Lazy consumer-side expiry avoids depending on a CRON / scheduler capability that Twenty App SDK 2.2 does not yet expose. The cost is that the field can read `COOLDOWN` long after the cooldown lapsed; the timestamp is the source of truth, the status is a hint.
 
+## Optional: auto-reset `COOLDOWN` → `IDLE` via Twenty Workflow
+
+If you want the status field to actually flip back to `IDLE` after the cooldown lapses (so the Person UI reads cleanly without consumers having to compute "is it really over?"), use a Twenty **Workflow** as the scheduler the App SDK lacks. This stays inside the "App publishes, consumers read" contract — the Workflow is a consumer that happens to write back.
+
+**Graph**
+
+```
+[Trigger: Person updated]
+        │
+        ▼
+[Filter: activeCallStatus === 'COOLDOWN']
+        │
+        ▼
+[Delay: 5 min]                                ← match ACTIVE_CALL_COOLDOWN_MINUTES
+        │
+        ▼
+[Re-fetch the same Person]
+        │
+        ▼
+[Branch: activeCallStatus === 'COOLDOWN'
+   AND activeCallCooldownUntil === <snapshot at trigger fire>]
+        │ true                          │ false
+        ▼                               ▼
+[Update Person { activeCallStatus: 'IDLE',   [End — race detected;
+                  activeCallCooldownUntil: null }]   the next COOLDOWN
+                                              transition will start its
+                                              own Workflow run]
+```
+
+**Why the snapshot check is race-safe**
+
+If a second call begins during the 5-min delay, the PBX webhook writes either `CALLING` (start) or a fresh `COOLDOWN` with a new `activeCallCooldownUntil` (end). Either way, the live `activeCallCooldownUntil` no longer equals the value captured when the Workflow fired — the Branch evaluates `false` and skips. The Workflow run that fired for the **fresh** `COOLDOWN` (whose snapshot matches the live value) handles the reset on its own schedule.
+
+This is stricter than a `cooldownUntil <= now` check: any change to the Person during the Delay aborts the reset, including a manual operator override. Desirable — operator intent should win.
+
+**Twenty Workflow specifics**
+
+- Twenty Workflow's trigger payload exposes the record at the moment the trigger fired; capture `activeCallCooldownUntil` from it. The Branch compares that captured value against the freshly-fetched record. If your Twenty version surfaces the trigger's `updatedAt` instead of arbitrary field snapshots, comparing `record.activeCallCooldownUntil === <trigger>.updatedAt` works the same way (it asserts "no write touched the Person between trigger fire and now").
+- The Delay duration must match `ACTIVE_CALL_COOLDOWN_MINUTES`. If they drift apart, the worst case is "field stays in `COOLDOWN` longer than necessary" — consumers still read the timestamp correctly, so no functional break, just a UI hint that's stale. Re-edit the Workflow when you change the applicationVariable.
+- Scaling: every call generates one Workflow run that sleeps for the cooldown window. For up to a few thousand calls per day this is unnoticeable; if you ever push tens of thousands, prefer an external CRON hitting a custom HTTP route trigger instead.
+
 ## Manual overrides
 
 Operators can edit `activeCallStatus` directly in the Person UI to break a stuck `CALLING` (e.g. webhook lost). That is intentional — it is a normal Twenty SELECT field.
