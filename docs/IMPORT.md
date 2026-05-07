@@ -41,7 +41,7 @@ Optional fields (`recording.*`, `transcript`, `summary`, `cost.*`, `callPath`) a
 ### `smsLog`
 
 ```csv
-messageId,direction,status,errorMessage,sentAt,clientNumber,ourNumber,body,cost.amountMicros,cost.currencyCode,name
+messageId,direction,status,errorMessage,sentAt,clientNumber,ourNumber,body,Amount (cost),Currency (cost),name
 ```
 
 | Column              | Type      | Required | Notes                                                                                          |
@@ -54,8 +54,8 @@ messageId,direction,status,errorMessage,sentAt,clientNumber,ourNumber,body,cost.
 | `clientNumber`      | string    | yes\*    | E.164 without `+`. Used by **Re-link orphans**.                                                |
 | `ourNumber`         | string    | yes      | Corporate Zadarma DID, E.164 without `+`.                                                      |
 | `body`              | string    | yes      | Full SMS text. Multi-line supported (CSV handles quoting).                                     |
-| `cost.amountMicros` | integer   |          | `cost * 1_000_000`, rounded. Empty if unknown.                                                 |
-| `cost.currencyCode` | string    |          | ISO 4217, e.g. `PLN`, `USD`, `EUR`.                                                            |
+| `Amount (cost)`     | decimal   |          | **Raw** currency amount (e.g. `0.9`). Twenty's CSV import multiplies by 10^6 internally to populate `amountMicros` — do NOT pre-multiply. Empty if unknown. |
+| `Currency (cost)`   | string    |          | ISO 4217, e.g. `PLN`, `USD`, `EUR`.                                                            |
 | `name`              | string    | yes      | Display label, e.g. `OUT 48792010388 — 2026-05-03 13:59`.                                      |
 
 \* Required for Re-link to find a match; rows without it import as orphans.

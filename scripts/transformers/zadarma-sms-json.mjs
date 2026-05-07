@@ -25,6 +25,16 @@ import { writeCsv, localToUtcIso, e164NoPlus, requireArg } from './_lib.mjs';
 
 const USAGE = `Usage: node scripts/transformers/zadarma-sms-json.mjs <input.json> <output.csv> [--our-number 48573580808] [--tz Europe/Warsaw]`;
 
+// Composite-field columns for Twenty Import use the format
+// `${SubFieldLabel} (${fieldName})` — verified in upstream
+// `spreadsheetImportGetCompositeSubFieldKey.ts`. For CURRENCY:
+//   amountMicros → label "Amount" → column "Amount (cost)"
+//   currencyCode → label "Currency" → column "Currency (cost)"
+// And the "Amount" sub-field expects the **raw amount** (e.g. 0.9), not the
+// micros integer; Twenty's import code multiplies by 10^6 on the way in.
+// Our first attempt wrote 900000 into `cost.amountMicros` — Twenty multiplied
+// → stored 900000 * 10^6 → displayed 900,000 PLN (off by 10^6). Caught on
+// first end-to-end migration.
 const CANONICAL_HEADER = [
   'messageId',
   'direction',
@@ -34,8 +44,8 @@ const CANONICAL_HEADER = [
   'clientNumber',
   'ourNumber',
   'body',
-  'cost.amountMicros',
-  'cost.currencyCode',
+  'Amount (cost)',
+  'Currency (cost)',
   'name',
 ];
 
@@ -99,11 +109,14 @@ const main = () => {
         : parsedSender || flags.ourNumber;
     const sentAt = row.date ? localToUtcIso(row.date, flags.tz) : '';
 
-    // Currency: Twenty's CURRENCY composite stores `amountMicros` (integer).
-    // Zadarma's `cost` is a float; round to nearest micro to absorb the
-    // floating-point garbage we saw in raw exports (e.g. 0.8999999999999999).
+    // Currency: Twenty's import multiplies the "Amount" sub-field value by
+    // 10^6 to land on `amountMicros`, so we write the raw amount here. Round
+    // through micros first to absorb the floating-point garbage we saw in raw
+    // exports (e.g. 0.8999999999999999 → 900000 micros → 0.9 raw).
     const costNum = Number(row.cost);
-    const amountMicros = Number.isFinite(costNum) ? Math.round(costNum * 1_000_000) : '';
+    const amount = Number.isFinite(costNum)
+      ? Math.round(costNum * 1_000_000) / 1_000_000
+      : '';
     const currencyCode = row.currency ?? '';
 
     const sentHM = row.date ? String(row.date).slice(0, 16) : '';
@@ -118,8 +131,8 @@ const main = () => {
       clientNumber,
       ourNumber,
       body: row.message ?? '',
-      'cost.amountMicros': String(amountMicros),
-      'cost.currencyCode': currencyCode,
+      'Amount (cost)': String(amount),
+      'Currency (cost)': currencyCode,
       name,
     });
   }

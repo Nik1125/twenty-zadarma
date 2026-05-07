@@ -27,10 +27,10 @@ Every transformer is a single `.mjs` file in this folder. It must:
 
    **smsLog canonical CSV header**:
    ```
-   messageId,direction,status,errorMessage,sentAt,clientNumber,ourNumber,body,cost.amountMicros,cost.currencyCode,name
+   messageId,direction,status,errorMessage,sentAt,clientNumber,ourNumber,body,Amount (cost),Currency (cost),name
    ```
 
-   Composite types use dot notation (`cost.amountMicros`, `recording.primaryLinkUrl`). Twenty Import understands them.
+   Composite-type sub-fields use Twenty's import column-naming convention `${SubFieldLabel} (${fieldName})` — e.g. `Amount (cost)`, `Currency (cost)`, `Link URL (recording)`. The "Amount" sub-field of a CURRENCY field expects the **raw** value (e.g. `0.9`), not pre-multiplied micros — Twenty multiplies by 10^6 internally.
 
 5. **Output values matching object SELECT enums verbatim** — e.g. `IN`/`OUT`, `ANSWERED`/`NO_ANSWER`/`BUSY`/`CANCEL`/`CALL_FAILED`, `SUCCESS`/`PENDING`/`FAILED`. See `src/objects/call-log.object.ts` and `src/objects/sms-log.object.ts` for the canonical lists.
 
