@@ -3,6 +3,7 @@ import { defineApplication } from 'twenty-sdk/define';
 import { ZADARMA_SETTINGS_FRONT_COMPONENT_UNIVERSAL_IDENTIFIER } from 'src/front-components/zadarma-settings.front-component';
 
 import {
+  ACTIVE_CALL_COOLDOWN_MINUTES_VARIABLE_UNIVERSAL_IDENTIFIER,
   APP_DESCRIPTION,
   APP_DISPLAY_NAME,
   APPLICATION_UNIVERSAL_IDENTIFIER,
@@ -57,6 +58,18 @@ export default defineApplication({
       description:
         '[Manage in Custom tab] IANA timezone of your Zadarma cabinet (Europe/Warsaw, Europe/Berlin, America/New_York, etc.). Required for accurate live call timestamps.',
       value: '',
+    },
+    // Window in minutes during which Person.activeCallStatus stays in
+    // 'cooldown' after a call ends. Consumers (n8n / Retell / future
+    // click-to-call) read this so a freshly-ended call is given time to
+    // surface in the logs (transcript, recording, SMS) before the next
+    // dialer attempts a follow-up. Lazy expiry — no background job clears
+    // the field; consumers compare activeCallCooldownUntil against now.
+    ACTIVE_CALL_COOLDOWN_MINUTES: {
+      universalIdentifier: ACTIVE_CALL_COOLDOWN_MINUTES_VARIABLE_UNIVERSAL_IDENTIFIER,
+      description:
+        '[Manage in Custom tab] Minutes a Person stays in active-call cooldown after a call ends. Consumers (n8n / Retell / click-to-call) honour this to avoid back-to-back dials. Default: 5.',
+      value: '5',
     },
   },
 });

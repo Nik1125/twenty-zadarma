@@ -8,7 +8,7 @@ describe('normalizePhone', () => {
   });
 
   it('strips spaces and dashes', () => {
-    expect(normalizePhone('+48 573-580 808')).toBe('48570000808');
+    expect(normalizePhone('+48 570-000 808')).toBe('48570000808');
   });
 
   it('strips parentheses', () => {
@@ -29,7 +29,7 @@ describe('normalizePhone', () => {
   });
 
   it('preserves all digits including leading zeros', () => {
-    expect(normalizePhone('00 48 573 580 808')).toBe('0048570000808');
+    expect(normalizePhone('00 48 570 000 808')).toBe('0048570000808');
   });
 
   it('handles already-normalized input', () => {

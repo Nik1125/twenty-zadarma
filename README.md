@@ -8,6 +8,7 @@ A [Twenty CRM](https://twenty.com) app that turns [Zadarma](https://zadarma.com)
 - **Inbound SMS** — Zadarma `SMS` events logged as `smsLog` records, auto-linked.
 - **Outbound SMS from Person panel** — pinned "Zadarma" Command on every Person + a dedicated tab on the Person record-show page (next to Calendar). Chat-style history, auto-grow textarea, signed Zadarma `/v1/sms/send/` call from the Twenty App with Bearer auth.
 - **Speech recognition transcripts** — `SPEECH_RECOGNITION` events parsed with speaker labels (Operator / Client) when stereo recording is enabled in Zadarma.
+- **Active-call lock on Person** — `Person.activeCallStatus` (`IDLE` / `CALLING` / `COOLDOWN`) and `Person.activeCallCooldownUntil` are kept in sync by the PBX webhooks so concurrent dialers (human operator + AI agent + n8n + extra staff) can avoid colliding on the same client. The App publishes; consumers read. Drop-in Twenty Workflow recipe for auto-resetting `COOLDOWN` → `IDLE` lives in [`docs/ACTIVE_CALL_LOCK.md`](docs/ACTIVE_CALL_LOCK.md#optional-auto-reset-cooldown--idle-via-twenty-workflow).
 - **Custom Settings tab** — connection test (balance / tariff / numbers), default-sender DID dropdown, transcript-enabled checkbox, webhook URL display + copy + echo test, quick setup checklist with Zadarma marketplace links.
 - **Theme-aware** — all UI follows Twenty's CSS theme variables (light / dark switch automatically).
 
@@ -82,6 +83,7 @@ After install, open your Twenty workspace → **Settings → Applications → Za
 | `DEFAULT_SENDER_DID` | leave blank, set it from the dropdown in the custom Zadarma Settings tab once balance loads |
 | `ZADARMA_TRANSCRIPT_ENABLED` | `true` / `false` — toggle `SPEECH_RECOGNITION` processing for call transcripts |
 | `ZADARMA_CABINET_TIMEZONE` | IANA timezone of your Zadarma cabinet (e.g. `Europe/Warsaw`, `Europe/Berlin`, `America/New_York`). Required for accurate `callLog.callStart` — set it in the **Cabinet timezone** field of the custom Zadarma Settings tab (autocomplete suggests common values). Without it live call records are saved without start time. |
+| `ACTIVE_CALL_COOLDOWN_MINUTES` | Active-call lock: minutes a Person stays in `COOLDOWN` after `NOTIFY_END`. Default `5`, max `1440`. Consumers (n8n / Retell / future click-to-call) read `Person.activeCallStatus` + `Person.activeCallCooldownUntil` to avoid back-to-back dials. App never enforces the lock — see [`docs/ACTIVE_CALL_LOCK.md`](docs/ACTIVE_CALL_LOCK.md) for the consumer contract. |
 
 ### Custom Zadarma Settings tab
 
