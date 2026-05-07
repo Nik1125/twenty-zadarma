@@ -48,3 +48,6 @@ yarn-error.log*
 # editor / agent local state
 .claude/
 .cursor/
+
+# user's local scratch space (CSV intermediates, exports, ad-hoc files)
+tmp/
