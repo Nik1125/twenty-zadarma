@@ -144,6 +144,10 @@ zadarma-person-panel ─────────────┘  (Twenty App, ru
 | `zadarma-person-panel` front-component | SMS chat panel — pinned Command + Person record-show tab |
 | `zadarma-settings` front-component | custom Settings tab |
 
+## Migration / Import
+
+Migrate historical calls and SMS from Zadarma (or any other source) via vendor-specific transformers that emit a canonical CSV ingestible by Twenty's built-in Import. See [`docs/IMPORT.md`](./docs/IMPORT.md) for the playbook and [`scripts/transformers/`](./scripts/transformers/) for the existing adapters.
+
 ## Contributing
 
 See [`CONTRIBUTING.md`](./CONTRIBUTING.md) for dev setup, file naming, ID schemes, phone format, secrets, the vitest local-uninstall gotcha, and PR conventions.
