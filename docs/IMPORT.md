@@ -87,8 +87,10 @@ Zadarma's public API does **not** expose SMS history — only the cabinet UI doe
    node scripts/transformers/zadarma-sms-json.mjs \
      zadarma_sms_2026-05-07.json \
      zadarma-sms-canonical.csv \
+     --our-number 48573580808 \
      --tz Europe/Warsaw
    ```
+   The `--our-number` flag fills `ourNumber` for outbound rows where Zadarma's `sender` field is an alphanumeric brand string (e.g. `"zadarma.com"`) instead of the actual DID. Use the public DID printed by **Settings → Zadarma → Direct numbers**. Inbound rows ignore the flag — there `sender` is always the client's E.164 phone.
 3. **Import** in Twenty: `Settings → Data → SMS logs → Import → CSV` → upload → Run.
 4. **Re-link orphans**: same button as above. SMS counter drops.
 

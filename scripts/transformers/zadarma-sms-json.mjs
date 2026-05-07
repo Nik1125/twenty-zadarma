@@ -1,10 +1,16 @@
 // Zadarma SMS history JSON export → canonical smsLog CSV.
 //
 // Usage:
-//   node scripts/transformers/zadarma-sms-json.mjs <input.json> <output.csv> [--tz Europe/Warsaw]
+//   node scripts/transformers/zadarma-sms-json.mjs <input.json> <output.csv> [--our-number 48573580808] [--tz Europe/Warsaw]
 //
 // Defaults: tz = Europe/Warsaw (the timezone Zadarma's cabinet displays
 // timestamps in).
+//
+// --our-number is a fallback for outbound rows where Zadarma populates
+// `sender` with an alphanumeric brand string (e.g. "zadarma.com") instead
+// of the actual DID. When the row's sender parses to digits, we keep it;
+// otherwise we substitute --our-number. Inbound rows ignore the flag
+// (sender there is always the client's E.164 phone).
 //
 // Source format: array of objects with keys
 //   id, sender, phonenumber, message, cost_per_one_part, cost, currency, parts,
@@ -17,7 +23,7 @@
 import { readFileSync, writeFileSync } from 'node:fs';
 import { writeCsv, localToUtcIso, e164NoPlus, requireArg } from './_lib.mjs';
 
-const USAGE = `Usage: node scripts/transformers/zadarma-sms-json.mjs <input.json> <output.csv> [--tz Europe/Warsaw]`;
+const USAGE = `Usage: node scripts/transformers/zadarma-sms-json.mjs <input.json> <output.csv> [--our-number 48573580808] [--tz Europe/Warsaw]`;
 
 const CANONICAL_HEADER = [
   'messageId',
@@ -35,11 +41,13 @@ const CANONICAL_HEADER = [
 
 const parseArgs = (argv) => {
   const positional = [];
-  const flags = { tz: 'Europe/Warsaw' };
+  const flags = { tz: 'Europe/Warsaw', ourNumber: '' };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === '--tz') {
       flags.tz = argv[++i];
+    } else if (a === '--our-number') {
+      flags.ourNumber = e164NoPlus(argv[++i]);
     } else {
       positional.push(a);
     }
@@ -74,8 +82,21 @@ const main = () => {
     const status = String(row.status).toLowerCase() === 'success' ? 'SUCCESS' : 'FAILED';
     const errorMessage = status === 'FAILED' ? (row.error ?? '') : '';
 
-    const clientNumber = e164NoPlus(row.phonenumber);
-    const ourNumber = e164NoPlus(row.sender);
+    // Sender / phonenumber roles flip with direction:
+    //   OUT: sender = our DID (or an alphanumeric brand like "zadarma.com"),
+    //        phonenumber = client
+    //   IN:  sender = client, phonenumber = our DID
+    // Initially we mapped both directions the same way and inbound rows landed
+    // with the swap. Then we found `sender` is sometimes a brand string for
+    // OUT rows — e164NoPlus strips it to ''. Falls back to --our-number flag
+    // so outbound ourNumber is consistent.
+    const clientNumber =
+      direction === 'IN' ? e164NoPlus(row.sender) : e164NoPlus(row.phonenumber);
+    const parsedSender = e164NoPlus(row.sender);
+    const ourNumber =
+      direction === 'IN'
+        ? e164NoPlus(row.phonenumber)
+        : parsedSender || flags.ourNumber;
     const sentAt = row.date ? localToUtcIso(row.date, flags.tz) : '';
 
     // Currency: Twenty's CURRENCY composite stores `amountMicros` (integer).
