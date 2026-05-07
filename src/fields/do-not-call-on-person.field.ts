@@ -23,4 +23,8 @@ export default defineField({
     'Marks this Person as opted-out of outbound calls and SMS. The Zadarma app reads this before any outbound action; external automations (n8n, Retell, manual toggle) write to it.',
   icon: 'IconPhoneOff',
   defaultValue: false,
+  // Existing Persons are migrated with NULL for this column (defaults only
+  // apply to new rows). Consumers must treat null as "no opt-out recorded —
+  // calling allowed".
+  isNullable: true,
 });

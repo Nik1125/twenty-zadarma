@@ -7,6 +7,7 @@ import { CoreApiClient } from 'twenty-client-sdk/core';
 
 import { signZadarmaRequest } from 'src/modules/zadarma/connector/sign-request';
 import { normalizePhone } from 'src/modules/zadarma/utils/normalize-phone';
+import { updateLastContactedIfNewer } from 'src/modules/zadarma/utils/update-last-contacted';
 
 // Trigger: when a manager creates an outbound smsLog through Twenty's standard
 // UI (`+ New SMS log` on a Person card), this hook picks it up and actually
@@ -29,6 +30,7 @@ type SmsLogAfter = {
   body?: string | null;
   clientNumber?: string | null;
   ourNumber?: string | null;
+  personId?: string | null;
 };
 
 type ZadarmaSmsSendResponse = {
@@ -126,6 +128,20 @@ const handler = async (
       id: true,
     },
   });
+
+  // Stamp Person.lastContactedAt for outbound touches we actually attempted —
+  // success and failure both count, since we tried to reach the contact. We
+  // do this inline here (rather than as a separate smsLog.created trigger)
+  // because Twenty's migration appears to reject a second App-owned
+  // subscriber on the same DB event; piggy-backing keeps the behaviour with
+  // a single subscriber.
+  if (after.personId) {
+    await updateLastContactedIfNewer(
+      client,
+      after.personId,
+      new Date().toISOString(),
+    );
+  }
 
   console.log(
     `[send-sms-on-smslog-created] smsLog=${smsLogId} number=${number} status=${data.status}`,
