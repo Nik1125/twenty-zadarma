@@ -26,6 +26,10 @@ type PersonNode = {
 type OrphanNode = { id: string; clientNumber?: string | null };
 
 const PAGE_SIZE = 200;
+// Mutations per Promise.all wave. CoreApiClient is workspace-internal so
+// there is no external rate limit, but each mutation still hits Postgres;
+// 10 keeps load bounded while cutting wall-time ~10x vs sequential awaits.
+const MUTATION_BATCH = 10;
 const SUFFIX_LEN = 9;
 
 const phoneKey = (raw: string | null | undefined): string | null => {
@@ -91,7 +95,9 @@ const linkOrphanCollection = async (
   let linked = 0;
   let after: string | null | undefined = undefined;
   let hasMore = true;
+  let pageNum = 0;
   while (hasMore) {
+    pageNum++;
     const res = (await client.query({
       [collection]: {
         __args: {
@@ -111,19 +117,34 @@ const linkOrphanCollection = async (
     >;
     const conn = res[collection];
     const edges = conn?.edges ?? [];
+
+    const toLink: Array<{ id: string; personId: string }> = [];
     for (const { node } of edges) {
       scanned++;
       const key = phoneKey(node.clientNumber);
       const personId = key ? personMap.get(key) : undefined;
-      if (!personId) continue;
-      await client.mutation({
-        [mutationName]: {
-          __args: { id: node.id, data: { personId } },
-          id: true,
-        },
-      });
-      linked++;
+      if (personId) toLink.push({ id: node.id, personId });
     }
+
+    for (let i = 0; i < toLink.length; i += MUTATION_BATCH) {
+      const batch = toLink.slice(i, i + MUTATION_BATCH);
+      await Promise.all(
+        batch.map(({ id, personId }) =>
+          client.mutation({
+            [mutationName]: {
+              __args: { id, data: { personId } },
+              id: true,
+            },
+          }),
+        ),
+      );
+      linked += batch.length;
+    }
+
+    console.log(
+      `[rescan-orphans] ${collection} page=${pageNum} scanned=${scanned} linked=${linked}`,
+    );
+
     hasMore = conn?.pageInfo?.hasNextPage === true;
     after = conn?.pageInfo?.endCursor;
     if (!after) hasMore = false;
@@ -170,7 +191,7 @@ export default defineLogicFunction({
   name: 'rescan-orphans',
   description:
     'Re-scans every callLog and smsLog with no Person link, matching them against every Person phone (primary + additionalPhones). Idempotent — safe to run repeatedly.',
-  timeoutSeconds: 120,
+  timeoutSeconds: 300,
   handler,
   httpRouteTriggerSettings: {
     path: '/zadarma/orphans/rescan',
