@@ -12,10 +12,23 @@ import { localToUtcIso } from 'src/modules/zadarma/utils/local-to-utc-iso';
 import { normalizePhone } from 'src/modules/zadarma/utils/normalize-phone';
 
 // Zadarma's webhook payload uses the cabinet's display timezone for
-// `call_start`. Polish accounts default to Europe/Warsaw. If your account is
-// configured for a different cabinet timezone, override via the
-// ZADARMA_CABINET_TIMEZONE applicationVariable.
-const ZADARMA_CABINET_TZ = process.env.ZADARMA_CABINET_TIMEZONE || 'Europe/Warsaw';
+// `call_start` (a wall-clock string with no offset). The applicationVariable
+// `ZADARMA_CABINET_TIMEZONE` (set in Settings → Zadarma) supplies the IANA tz
+// for the conversion. If unset we cannot convert reliably — we omit callStart
+// instead of guessing, to keep the data store correct.
+const resolveCallStartIso = (
+  rawCallStart: string | undefined,
+): string | undefined => {
+  if (!rawCallStart) return undefined;
+  const cabinetTz = process.env.ZADARMA_CABINET_TIMEZONE?.trim();
+  if (!cabinetTz) {
+    console.warn(
+      `[zadarma-pbx-webhook] ZADARMA_CABINET_TIMEZONE not set — omitting callStart for "${rawCallStart}". Set Cabinet timezone in Settings → Zadarma to enable accurate timestamps.`,
+    );
+    return undefined;
+  }
+  return localToUtcIso(rawCallStart, cabinetTz) ?? undefined;
+};
 
 const REGISTERED_PATH = '/zadarma/pbx-webhook';
 
@@ -139,7 +152,7 @@ const handleNotifyEnd = async (body: ZadarmaPbxEvent & Record<string, unknown>) 
           name: `${callType} ${clientNumber ?? '?'}${body.call_start ? ' — ' + body.call_start : ''}`,
           pbxCallId,
           callType,
-          callStart: localToUtcIso(body.call_start, ZADARMA_CABINET_TZ) ?? undefined,
+          callStart: resolveCallStartIso(body.call_start),
           duration,
           disposition,
           clientNumber: clientNumber ?? '',

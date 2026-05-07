@@ -81,6 +81,7 @@ After install, open your Twenty workspace → **Settings → Applications → Za
 | `ZADARMA_SECRET` | secret — from the same place |
 | `DEFAULT_SENDER_DID` | leave blank, set it from the dropdown in the custom Zadarma Settings tab once balance loads |
 | `ZADARMA_TRANSCRIPT_ENABLED` | `true` / `false` — toggle `SPEECH_RECOGNITION` processing for call transcripts |
+| `ZADARMA_CABINET_TIMEZONE` | IANA timezone of your Zadarma cabinet (e.g. `Europe/Warsaw`, `Europe/Berlin`, `America/New_York`). Required for accurate `callLog.callStart` — set it in the **Cabinet timezone** field of the custom Zadarma Settings tab (autocomplete suggests common values). Without it live call records are saved without start time. |
 
 ### Custom Zadarma Settings tab
 
@@ -88,6 +89,7 @@ Switch to the **Zadarma** tab inside Settings. You will see:
 - balance / tariff / direct numbers (loaded via the `/s/zadarma/info` endpoint)
 - a **DID dropdown** — pick the number outbound SMS should be sent from
 - a **Transcript** checkbox
+- a **Cabinet timezone** field with IANA-tz autocomplete — must match the timezone shown in your Zadarma cabinet UI; the app uses it to convert webhook `call_start` strings to UTC and handles DST automatically. Leave blank only if you do not record live call timestamps.
 - both **webhook URLs** with Copy + Test buttons
 - a quick setup checklist with links into the Zadarma marketplace
 
