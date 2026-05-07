@@ -144,6 +144,10 @@ zadarma-person-panel ─────────────┘  (Twenty App, ru
 | `zadarma-person-panel` front-component | SMS chat panel — pinned Command + Person record-show tab |
 | `zadarma-settings` front-component | custom Settings tab |
 
+## Contributing
+
+See [`CONTRIBUTING.md`](./CONTRIBUTING.md) for dev setup, file naming, ID schemes, phone format, secrets, the vitest local-uninstall gotcha, and PR conventions.
+
 ## License
 
 MIT — see [`LICENSE`](./LICENSE).
