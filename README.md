@@ -20,23 +20,31 @@ A [Twenty CRM](https://twenty.com) app that turns [Zadarma](https://zadarma.com)
 
 ## Server prerequisites
 
-Twenty defaults `LOGIC_FUNCTION_TYPE` to `DISABLED`, which makes every Twenty App's HTTP route, webhook, and database trigger crash with `LOGIC_FUNCTION_EXECUTION_ERROR`. Before installing this app, make sure the Twenty server has logic-function execution enabled.
+Twenty defaults `LOGIC_FUNCTION_TYPE` to `DISABLED`, which makes every Twenty App's HTTP route, webhook, and database trigger crash with `LOGIC_FUNCTION_EXECUTION_ERROR`. Before (or right after) installing this app, switch the driver to `LOCAL`.
 
-**Self-hosted (Docker / Coolify / Compose) — recommended:**
+**Recommended — Twenty admin UI (no restart required):**
 
-Add the following environment variable to your Twenty server and restart the container:
+1. In your Twenty workspace, open **Settings → Admin Panel → Config Variables** (workspace owner / admin role required).
+2. Search for **`LOGIC_FUNCTION_TYPE`**.
+3. Change its value to **`LOCAL`** and save.
+
+Changes take effect immediately — no container restart, no SSH, no env file edits. This works for any Twenty config variable, not just this one.
+
+**Alternative — Docker / Coolify / Compose env file:**
+
+If you prefer to bake the value into your deployment, add the environment variable to your Twenty server and restart the container:
 
 ```env
 LOGIC_FUNCTION_TYPE=LOCAL
 ```
 
-This makes Twenty execute logic-functions inside its own container — no AWS, no extra services. The `LAMBDA` driver is for multi-tenant SaaS deployments only and needs AWS configuration; ignore it for self-hosted.
+In Coolify: open the Twenty service → *Environment Variables* → add `LOGIC_FUNCTION_TYPE=LOCAL` → *Restart*.
 
-**Coolify** — open the Twenty service, go to *Environment Variables*, add `LOGIC_FUNCTION_TYPE=LOCAL`, and click *Restart*.
+Either path produces the same result; `LocalDriver` runs logic-functions inside the Twenty server container itself with no extra services. The `LAMBDA` driver is for multi-tenant SaaS deployments and needs AWS configuration — ignore it for self-hosted.
 
 **Twenty Cloud (twenty.com)** — already enabled, no action needed.
 
-You can verify it's working by hitting your Twenty server's healthz before installing — but a clearer check is to install this app and load the Settings → Zadarma tab. If you see balance / tariff data, logic-functions are running.
+To verify: install this app, open *Settings → Zadarma*. If balance / tariff data load, logic-functions are running.
 
 ## Install
 
@@ -101,7 +109,7 @@ Trigger a test call and a test SMS in the Zadarma cabinet — the corresponding 
 
 ## Troubleshooting
 
-**Settings → Zadarma test fails / `LOGIC_FUNCTION_EXECUTION_ERROR` everywhere** — your Twenty server is on the default `DISABLED` driver. See [Server prerequisites](#server-prerequisites).
+**Settings → Zadarma test fails / `LOGIC_FUNCTION_EXECUTION_ERROR` everywhere** — your Twenty server is on the default `DISABLED` driver. Open *Settings → Admin Panel → Config Variables*, set `LOGIC_FUNCTION_TYPE=LOCAL`, save. Applies instantly. See [Server prerequisites](#server-prerequisites) for the env-file alternative.
 
 **SMS test in the Zadarma cabinet returns "couldn't reach webhook"** — Zadarma's *Test* button calls from the public internet, so a `localhost:2020` Twenty won't be reachable. Either expose your dev Twenty via a tunnel (Cloudflare Quick Tunnel, ngrok, etc.) or test by triggering a real call/SMS to the configured DID.
 
