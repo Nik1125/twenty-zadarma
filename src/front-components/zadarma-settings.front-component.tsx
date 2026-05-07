@@ -22,6 +22,36 @@ type WebhookCheck = {
 
 type AppVar = { key: string; value: string };
 
+// Common IANA timezones for Zadarma cabinet locations. Datalist suggestions
+// only — users can also type any other valid IANA name.
+const COMMON_IANA_TIMEZONES = [
+  'Europe/Warsaw',
+  'Europe/Berlin',
+  'Europe/Vienna',
+  'Europe/Prague',
+  'Europe/Paris',
+  'Europe/London',
+  'Europe/Madrid',
+  'Europe/Rome',
+  'Europe/Athens',
+  'Europe/Bucharest',
+  'Europe/Kyiv',
+  'Europe/Moscow',
+  'Europe/Istanbul',
+  'Asia/Dubai',
+  'Asia/Tbilisi',
+  'Asia/Yerevan',
+  'Asia/Almaty',
+  'Asia/Tashkent',
+  'Asia/Baku',
+  'America/New_York',
+  'America/Chicago',
+  'America/Denver',
+  'America/Los_Angeles',
+  'America/Toronto',
+  'America/Sao_Paulo',
+];
+
 const ZadarmaSettings = () => {
   const apiBaseUrl = useMemo(
     () => (process.env.TWENTY_API_URL ?? '').replace(/\/$/, ''),
@@ -40,7 +70,19 @@ const ZadarmaSettings = () => {
   const [appId, setAppId] = useState<string | null>(null);
   const [defaultSenderDid, setDefaultSenderDid] = useState<string>('');
   const [transcriptEnabled, setTranscriptEnabled] = useState<boolean>(true);
+  const [cabinetTimezone, setCabinetTimezone] = useState<string>('');
+  const [tzCustomMode, setTzCustomMode] = useState<boolean>(false);
   const [savingVar, setSavingVar] = useState<string | null>(null);
+
+  const tzValid = useMemo<boolean | null>(() => {
+    if (!cabinetTimezone) return null;
+    try {
+      new Intl.DateTimeFormat('en-US', { timeZone: cabinetTimezone });
+      return true;
+    } catch {
+      return false;
+    }
+  }, [cabinetTimezone]);
 
   const [orphanCounts, setOrphanCounts] = useState<{ calls: number; sms: number } | null>(null);
   const [rescanning, setRescanning] = useState(false);
@@ -89,8 +131,14 @@ const ZadarmaSettings = () => {
       const vars = app?.applicationVariables ?? [];
       const did = vars.find((v) => v.key === 'DEFAULT_SENDER_DID')?.value ?? '';
       const tr = (vars.find((v) => v.key === 'ZADARMA_TRANSCRIPT_ENABLED')?.value ?? 'true').toLowerCase();
+      const tz = vars.find((v) => v.key === 'ZADARMA_CABINET_TIMEZONE')?.value ?? '';
       setDefaultSenderDid(did);
       setTranscriptEnabled(tr !== 'false' && tr !== '0');
+      setCabinetTimezone(tz);
+      // Open free-text mode when the persisted value is not in our common list.
+      if (tz && !COMMON_IANA_TIMEZONES.includes(tz)) {
+        setTzCustomMode(true);
+      }
     } catch {
       // Non-fatal — sliders fall back to defaults; user can still use the
       // standard Settings tab to change values.
@@ -291,8 +339,26 @@ const ZadarmaSettings = () => {
   // Note: blue link colour stays hard-coded — readable on both light and dark
   // Twenty themes (#3b82f6 has solid contrast against both backgrounds).
 
+  const tzMissing = appId !== null && cabinetTimezone.trim() === '';
+
   return (
     <div style={container}>
+      {tzMissing && (
+        <div style={{
+          background: 'var(--t-background-transparent-danger)',
+          border: '1px solid var(--t-font-color-danger)',
+          borderRadius: 8,
+          padding: 12,
+          fontSize: 13,
+          color: 'var(--t-font-color-danger)',
+          lineHeight: 1.5,
+        }}>
+          <strong>⚠ Cabinet timezone not configured.</strong> Live call records
+          will be saved without start time until you set this in
+          <strong> Behaviour → Cabinet timezone</strong> below. Existing data is
+          unaffected.
+        </div>
+      )}
       {/* ── 1. Connection status */}
       <div style={section}>
         <div style={sectionTitle}>Zadarma connection</div>
@@ -409,6 +475,70 @@ const ZadarmaSettings = () => {
             </span>
           </label>
           {savingVar === 'ZADARMA_TRANSCRIPT_ENABLED' && <span style={{ fontSize: 11, color: 'var(--t-font-color-secondary)' }}>saving…</span>}
+        </div>
+
+        <div style={row}>
+          <span style={labelCol}>Cabinet timezone</span>
+          {!tzCustomMode ? (
+            <select
+              value={COMMON_IANA_TIMEZONES.includes(cabinetTimezone) ? cabinetTimezone : ''}
+              onChange={(e: { detail?: { value?: string } }) => {
+                const next = e.detail?.value ?? '';
+                if (next === '__custom__') {
+                  setTzCustomMode(true);
+                  setCabinetTimezone('');
+                  return;
+                }
+                setCabinetTimezone(next);
+                updateAppVar('ZADARMA_CABINET_TIMEZONE', next);
+              }}
+              disabled={!appId || savingVar === 'ZADARMA_CABINET_TIMEZONE'}
+              style={{ flex: 1, padding: '4px 8px', fontSize: 12, fontFamily: 'inherit' }}
+            >
+              <option value="">— pick a timezone —</option>
+              {COMMON_IANA_TIMEZONES.map((tz) => (
+                <option key={tz} value={tz}>{tz}</option>
+              ))}
+              <option value="__custom__">Other (type IANA name)…</option>
+            </select>
+          ) : (
+            <>
+              <input
+                value={cabinetTimezone}
+                placeholder="e.g. Pacific/Auckland"
+                onChange={(e: { detail?: { value?: string } }) => setCabinetTimezone(e.detail?.value ?? '')}
+                onBlur={() => {
+                  const trimmed = cabinetTimezone.trim();
+                  if (trimmed && tzValid) {
+                    updateAppVar('ZADARMA_CABINET_TIMEZONE', trimmed);
+                  }
+                }}
+                disabled={!appId}
+                style={{ flex: 1, padding: '4px 8px', fontSize: 12, fontFamily: 'inherit' }}
+              />
+              <button
+                type="button"
+                style={button('ghost')}
+                onClick={() => {
+                  setTzCustomMode(false);
+                  setCabinetTimezone('');
+                  updateAppVar('ZADARMA_CABINET_TIMEZONE', '');
+                }}
+              >
+                back to list
+              </button>
+            </>
+          )}
+          {tzCustomMode && tzValid === true && <span style={badge('#16a34a')}>✓ valid</span>}
+          {tzCustomMode && tzValid === false && <span style={badge('#dc2626')}>✗ invalid IANA</span>}
+          {savingVar === 'ZADARMA_CABINET_TIMEZONE' && <span style={{ fontSize: 11, color: 'var(--t-font-color-secondary)' }}>saving…</span>}
+        </div>
+        <div style={{ ...sectionHelp, marginTop: 4, marginBottom: 0, marginLeft: 138 }}>
+          Pick the city closest to your Zadarma cabinet — same timezone shown
+          in the Zadarma UI. Daylight-saving handled automatically. Pick
+          "Other…" if your timezone is not in the list
+          (<a href="https://en.wikipedia.org/wiki/List_of_tz_database_time_zones" target="_blank" rel="noopener noreferrer" style={linkStyle}>full reference</a>).
+          Without this, live call records are saved without start time.
         </div>
       </div>
 
