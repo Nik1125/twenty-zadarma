@@ -30,7 +30,7 @@ src/
   application-config.ts          App identity + applicationVariables
   default-role.ts                Default RBAC role for the App
   constants/                     Shared UUIDs and string constants
-  objects/                       Custom objects (callLog, smsLog, zadarmaWebhookEvent)
+  objects/                       Custom objects (callLog, smsLog)
   fields/                        Field definitions (one per file, links Person ↔ logs)
   views/                         Index views per object
   page-layouts/                  Standard-object page layout overrides
@@ -97,7 +97,6 @@ Rule of thumb: **if the source platform supplies a stable unique ID, use it as-i
 | `smsLog`     | Zadarma webhook (real-time inbound)         | `messageId`   | **synthetic** — Zadarma provides no ID       | `<num>-<tsCompact>-<4hex>` (below)  | per-workspace  |
 | `smsLog`     | Zadarma `/sms/send` response (outbound)     | `messageId`   | **synthetic** — Zadarma response carries no ID | same synthetic format             | per-workspace  |
 | `smsLog`     | Zadarma history-page export (JSON parse)    | `messageId`   | row's `id` field                             | string                              | global         |
-| `zadarmaWebhookEvent` | any                                | `id`          | Twenty auto                                  | UUID v4                             | per-workspace  |
 
 ### Synthetic ID format (smsLog only)
 
