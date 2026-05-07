@@ -42,6 +42,10 @@ const ZadarmaSettings = () => {
   const [transcriptEnabled, setTranscriptEnabled] = useState<boolean>(true);
   const [savingVar, setSavingVar] = useState<string | null>(null);
 
+  const [orphanCounts, setOrphanCounts] = useState<{ calls: number; sms: number } | null>(null);
+  const [rescanning, setRescanning] = useState(false);
+  const [rescanResult, setRescanResult] = useState<string | null>(null);
+
   const refreshInfo = async () => {
     if (!apiBaseUrl || !accessToken) return;
     setInfoLoading(true);
@@ -85,9 +89,57 @@ const ZadarmaSettings = () => {
     }
   };
 
+  const fetchOrphanCounts = async () => {
+    if (!apiBaseUrl || !accessToken) return;
+    try {
+      const r = await fetch(`${apiBaseUrl}/s/zadarma/orphans/counts`, {
+        method: 'GET',
+        headers: { Authorization: `Bearer ${accessToken}` },
+      });
+      const json = (await r.json()) as { ok?: boolean; unlinkedCalls?: number; unlinkedSms?: number };
+      if (json.ok) {
+        setOrphanCounts({ calls: json.unlinkedCalls ?? 0, sms: json.unlinkedSms ?? 0 });
+      }
+    } catch {
+      // Non-fatal — counter just stays hidden if the endpoint is unreachable.
+    }
+  };
+
+  const runRescan = async () => {
+    if (!apiBaseUrl || !accessToken || rescanning) return;
+    setRescanning(true);
+    setRescanResult(null);
+    try {
+      const r = await fetch(`${apiBaseUrl}/s/zadarma/orphans/rescan`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${accessToken}` },
+      });
+      const json = (await r.json()) as {
+        ok?: boolean;
+        scannedCalls?: number;
+        linkedCalls?: number;
+        scannedSms?: number;
+        linkedSms?: number;
+      };
+      if (json.ok) {
+        setRescanResult(
+          `Linked ${json.linkedCalls ?? 0} calls and ${json.linkedSms ?? 0} SMS (scanned ${json.scannedCalls ?? 0} / ${json.scannedSms ?? 0}).`,
+        );
+        await fetchOrphanCounts();
+      } else {
+        setRescanResult('Rescan failed — check server logs.');
+      }
+    } catch (e) {
+      setRescanResult(e instanceof Error ? e.message : String(e));
+    } finally {
+      setRescanning(false);
+    }
+  };
+
   useEffect(() => {
     refreshInfo();
     fetchAppVars();
+    fetchOrphanCounts();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -331,7 +383,55 @@ const ZadarmaSettings = () => {
         </div>
       </div>
 
-      {/* ── 4. Setup checklist */}
+      {/* ── 4. Orphans (calls/SMS without a Person) */}
+      <div style={section}>
+        <div style={sectionTitle}>Orphan records</div>
+        <div style={sectionHelp}>
+          Calls and SMS that arrived before the matching Person existed are kept with no Person link.
+          New Persons are auto-linked on create/update; this button does a full sweep across every Person phone
+          (primary + additional) and links every orphan that matches.
+        </div>
+        {orphanCounts && (
+          <>
+            <div style={row}>
+              <span style={labelCol}>Calls without Person</span>
+              <strong>{orphanCounts.calls}</strong>
+            </div>
+            <div style={row}>
+              <span style={labelCol}>SMS without Person</span>
+              <strong>{orphanCounts.sms}</strong>
+            </div>
+          </>
+        )}
+        {!orphanCounts && (
+          <div style={{ fontSize: 12, color: 'var(--t-font-color-secondary)', marginBottom: 8 }}>
+            Loading counters…
+          </div>
+        )}
+        <div style={{ marginTop: 12, display: 'flex', alignItems: 'center', gap: 12 }}>
+          <button
+            type="button"
+            style={button(
+              'primary',
+              rescanning || (orphanCounts?.calls === 0 && orphanCounts?.sms === 0),
+            )}
+            onClick={() => runRescan()}
+            disabled={rescanning || (orphanCounts?.calls === 0 && orphanCounts?.sms === 0)}
+          >
+            {rescanning ? 'Rescanning…' : 'Re-link orphans'}
+          </button>
+          <button type="button" style={button('ghost', rescanning)} onClick={() => fetchOrphanCounts()} disabled={rescanning}>
+            Refresh counts
+          </button>
+          {rescanResult && (
+            <span style={{ fontSize: 12, color: 'var(--t-font-color-secondary)' }}>
+              {rescanResult}
+            </span>
+          )}
+        </div>
+      </div>
+
+      {/* ── 5. Setup checklist */}
       <div style={section}>
         <div style={sectionTitle}>Quick setup checklist</div>
         <ol style={{ fontSize: 13, color: 'var(--t-font-color-primary)', paddingLeft: 20, margin: 0, lineHeight: 1.7 }}>
