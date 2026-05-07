@@ -46,6 +46,14 @@ const ZadarmaSettings = () => {
   const [rescanning, setRescanning] = useState(false);
   const [rescanResult, setRescanResult] = useState<string | null>(null);
 
+  const [lastContactedCounts, setLastContactedCounts] = useState<{
+    total: number;
+    withTimestamp: number;
+    withoutTimestamp: number;
+  } | null>(null);
+  const [recomputing, setRecomputing] = useState(false);
+  const [recomputeResult, setRecomputeResult] = useState<string | null>(null);
+
   const refreshInfo = async () => {
     if (!apiBaseUrl || !accessToken) return;
     setInfoLoading(true);
@@ -136,10 +144,68 @@ const ZadarmaSettings = () => {
     }
   };
 
+  const fetchLastContactedCounts = async () => {
+    if (!apiBaseUrl || !accessToken) return;
+    try {
+      const r = await fetch(`${apiBaseUrl}/s/zadarma/last-contacted/counts`, {
+        method: 'GET',
+        headers: { Authorization: `Bearer ${accessToken}` },
+      });
+      const json = (await r.json()) as {
+        ok?: boolean;
+        total?: number;
+        withTimestamp?: number;
+        withoutTimestamp?: number;
+      };
+      if (json.ok) {
+        setLastContactedCounts({
+          total: json.total ?? 0,
+          withTimestamp: json.withTimestamp ?? 0,
+          withoutTimestamp: json.withoutTimestamp ?? 0,
+        });
+      }
+    } catch {
+      // Non-fatal — counter just stays hidden if the endpoint is unreachable.
+    }
+  };
+
+  const runRecompute = async () => {
+    if (!apiBaseUrl || !accessToken || recomputing) return;
+    setRecomputing(true);
+    setRecomputeResult(null);
+    try {
+      const r = await fetch(`${apiBaseUrl}/s/zadarma/last-contacted/recompute`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${accessToken}` },
+      });
+      const json = (await r.json()) as {
+        ok?: boolean;
+        personsConsidered?: number;
+        scannedCalls?: number;
+        scannedSms?: number;
+        updated?: number;
+        skippedSameOrNewer?: number;
+      };
+      if (json.ok) {
+        setRecomputeResult(
+          `Updated ${json.updated ?? 0} of ${json.personsConsidered ?? 0} Persons (scanned ${json.scannedCalls ?? 0} calls, ${json.scannedSms ?? 0} SMS; skipped ${json.skippedSameOrNewer ?? 0} same-or-newer).`,
+        );
+        await fetchLastContactedCounts();
+      } else {
+        setRecomputeResult('Recompute failed — check server logs.');
+      }
+    } catch (e) {
+      setRecomputeResult(e instanceof Error ? e.message : String(e));
+    } finally {
+      setRecomputing(false);
+    }
+  };
+
   useEffect(() => {
     refreshInfo();
     fetchAppVars();
     fetchOrphanCounts();
+    fetchLastContactedCounts();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -426,6 +492,63 @@ const ZadarmaSettings = () => {
           {rescanResult && (
             <span style={{ fontSize: 12, color: 'var(--t-font-color-secondary)' }}>
               {rescanResult}
+            </span>
+          )}
+        </div>
+      </div>
+
+      {/* ── 4b. Last contact backfill */}
+      <div style={section}>
+        <div style={sectionTitle}>Last contact backfill</div>
+        <div style={sectionHelp}>
+          New outbound calls and SMS automatically stamp <code>Person.lastContactedAt</code>. Use this
+          to recompute the timestamp from history after a CSV import or to recover from a missed
+          live update. Idempotent — safe to run repeatedly.
+        </div>
+        {lastContactedCounts && (
+          <>
+            <div style={row}>
+              <span style={labelCol}>People with timestamp</span>
+              <strong>{lastContactedCounts.withTimestamp}</strong>
+            </div>
+            <div style={row}>
+              <span style={labelCol}>People without timestamp</span>
+              <strong>{lastContactedCounts.withoutTimestamp}</strong>
+            </div>
+            <div style={row}>
+              <span style={labelCol}>Total people</span>
+              <strong>{lastContactedCounts.total}</strong>
+            </div>
+          </>
+        )}
+        {!lastContactedCounts && (
+          <div style={{ fontSize: 12, color: 'var(--t-font-color-secondary)', marginBottom: 8 }}>
+            Loading counters…
+          </div>
+        )}
+        <div style={{ marginTop: 12, display: 'flex', alignItems: 'center', gap: 12 }}>
+          <button
+            type="button"
+            style={button(
+              'primary',
+              recomputing || lastContactedCounts?.total === 0,
+            )}
+            onClick={() => runRecompute()}
+            disabled={recomputing || lastContactedCounts?.total === 0}
+          >
+            {recomputing ? 'Recomputing…' : 'Recompute from history'}
+          </button>
+          <button
+            type="button"
+            style={button('ghost', recomputing)}
+            onClick={() => fetchLastContactedCounts()}
+            disabled={recomputing}
+          >
+            Refresh counts
+          </button>
+          {recomputeResult && (
+            <span style={{ fontSize: 12, color: 'var(--t-font-color-secondary)' }}>
+              {recomputeResult}
             </span>
           )}
         </div>
