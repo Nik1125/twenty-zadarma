@@ -447,7 +447,7 @@ const ZadarmaSettings = () => {
           ) : (
             <input
               value={defaultSenderDid}
-              placeholder="48573580808"
+              placeholder="48570000808"
               onChange={(e: { detail?: { value?: string } }) => setDefaultSenderDid(e.detail?.value ?? '')}
               onBlur={() => updateAppVar('DEFAULT_SENDER_DID', defaultSenderDid)}
               disabled={!appId}

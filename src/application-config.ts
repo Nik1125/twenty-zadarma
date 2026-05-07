@@ -38,7 +38,7 @@ export default defineApplication({
     DEFAULT_SENDER_DID: {
       universalIdentifier: DEFAULT_SENDER_DID_VARIABLE_UNIVERSAL_IDENTIFIER,
       description:
-        '[Manage in Custom tab] Default outbound DID. Format: E.164 without "+". Example: 48573580808.',
+        '[Manage in Custom tab] Default outbound DID. Format: E.164 without "+". Example: 48570000808.',
       value: '',
     },
     ZADARMA_TRANSCRIPT_ENABLED: {

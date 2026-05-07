@@ -35,7 +35,7 @@ describe('signZadarmaRequest → verifyZadarmaWebhook round-trip', () => {
       event: 'NOTIFY_END',
       pbx_call_id: 'in_abc123',
       caller_id: '48792010388',
-      called_did: '48573580808',
+      called_did: '48570000808',
       disposition: 'answered',
       duration: '42',
     };
@@ -207,7 +207,7 @@ describe('phpEncode parity (RFC 1738 with !\'()* escaped)', () => {
     const path = '/zadarma/webhook';
     const params = {
       message: "Hi! It's a (test) *call*",
-      number: '48573580808',
+      number: '48570000808',
     };
 
     const signed = signZadarmaRequest({
