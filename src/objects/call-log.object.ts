@@ -45,6 +45,8 @@ export const CALL_LOG_AI_COST_FIELD_UNIVERSAL_IDENTIFIER =
   '8d3a5b62-1f47-4e98-b2c5-7e9d4a6c3f81';
 export const CALL_LOG_CORRELATION_ID_FIELD_UNIVERSAL_IDENTIFIER =
   '6b1e9c34-4d27-4f58-a803-2e9c8f5b7d61';
+export const CALL_LOG_CALLER_TYPE_FIELD_UNIVERSAL_IDENTIFIER =
+  'e97926fb-321f-456d-8350-cca6ae9e6530';
 
 export default defineObject({
   universalIdentifier: CALL_LOG_OBJECT_UNIVERSAL_IDENTIFIER,
@@ -329,6 +331,39 @@ export default defineObject({
         'Vendor-side call identifier (e.g. Retell call_id). Used as the idempotent join key for re-runs of /zadarma/call-enrichment. Vendor-raw debug data (tool calls, latency, transcripts) lives in a Note linked to this callLog via noteTargets, not on the callLog itself.',
       icon: 'IconLink',
       isNullable: true,
+    },
+    {
+      universalIdentifier: CALL_LOG_CALLER_TYPE_FIELD_UNIVERSAL_IDENTIFIER,
+      type: FieldType.SELECT,
+      name: 'callerType',
+      label: 'Caller type',
+      description:
+        'Who initiated the call: HUMAN if internalExtension is set and not in AI_EXTENSIONS, AI if in AI_EXTENSIONS, UNKNOWN otherwise. Auto-filled from the Zadarma webhook payload — orthogonal to aiAgentName (vendor-side identity).',
+      icon: 'IconUserCircle',
+      defaultValue: "'UNKNOWN'",
+      options: [
+        {
+          id: '793c71f0-8f07-44dc-bf39-d39edea0463a',
+          value: 'HUMAN',
+          label: 'Human',
+          position: 0,
+          color: 'blue',
+        },
+        {
+          id: '7abce9a6-f992-41be-8d60-fa7e21cc2011',
+          value: 'AI',
+          label: 'AI',
+          position: 1,
+          color: 'purple',
+        },
+        {
+          id: '0ac627df-75ee-4bb3-9f39-96e4dc4c3b74',
+          value: 'UNKNOWN',
+          label: 'Unknown',
+          position: 2,
+          color: 'gray',
+        },
+      ],
     },
   ],
 });

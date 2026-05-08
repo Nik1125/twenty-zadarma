@@ -8,9 +8,11 @@ import {
 } from 'src/modules/zadarma/connector/verify-webhook';
 import { signZadarmaRequest } from 'src/modules/zadarma/connector/sign-request';
 import { resolveCooldownUntilIso } from 'src/modules/zadarma/utils/active-call-lock';
+import { deriveCallerType } from 'src/modules/zadarma/utils/derive-caller-type';
 import { findPersonIdByClientNumber } from 'src/modules/zadarma/utils/find-person-by-phone';
 import { localToUtcIso } from 'src/modules/zadarma/utils/local-to-utc-iso';
 import { normalizePhone } from 'src/modules/zadarma/utils/normalize-phone';
+import { parseAiExtensions } from 'src/modules/zadarma/utils/parse-ai-extensions';
 
 // Zadarma's webhook payload uses the cabinet's display timezone for
 // `call_start` (a wall-clock string with no offset). The applicationVariable
@@ -172,6 +174,10 @@ const handleNotifyEnd = async (body: ZadarmaPbxEvent & Record<string, unknown>) 
   const existingId = await findCallLogIdByPbxCallId(client, pbxCallId);
   const disposition = mapDisposition(body.disposition);
   const duration = parseDuration(body.duration);
+  const callerType = deriveCallerType(
+    body.internal,
+    parseAiExtensions(process.env.AI_EXTENSIONS),
+  );
 
   if (existingId) {
     await client.mutation({
@@ -182,6 +188,7 @@ const handleNotifyEnd = async (body: ZadarmaPbxEvent & Record<string, unknown>) 
             duration,
             disposition,
             internalExtension: body.internal || null,
+            callerType,
             ...(personId ? { personId } : {}),
           },
         },
@@ -208,6 +215,7 @@ const handleNotifyEnd = async (body: ZadarmaPbxEvent & Record<string, unknown>) 
           clientNumber: clientNumber ?? '',
           ourNumber: ourNumber ?? '',
           internalExtension: body.internal || null,
+          callerType,
           personId,
         },
       },
