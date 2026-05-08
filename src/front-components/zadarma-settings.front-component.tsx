@@ -96,6 +96,32 @@ const ZadarmaSettings = () => {
   const [recomputing, setRecomputing] = useState(false);
   const [recomputeResult, setRecomputeResult] = useState<string | null>(null);
 
+  // Sync calls from Zadarma — incremental by default, custom range capped at 1 year.
+  type SyncMode = 'incremental' | 'custom';
+  const [syncMode, setSyncMode] = useState<SyncMode>('incremental');
+  const [syncFromLocal, setSyncFromLocal] = useState('');
+  const [syncToLocal, setSyncToLocal] = useState('');
+  const [syncing, setSyncing] = useState(false);
+  const [syncResult, setSyncResult] = useState<string | null>(null);
+
+  // datetime-local values are interpreted in the browser's local timezone, then
+  // converted to UTC ISO. For users whose browser TZ matches the cabinet TZ
+  // this matches what they see in the Zadarma cabinet. The 1h overlap default
+  // (server side) protects against minor drift; if the count looks off, run
+  // again with adjusted bounds.
+  const customRangeDays = useMemo(() => {
+    if (!syncFromLocal || !syncToLocal) return null;
+    const fromMs = Date.parse(syncFromLocal);
+    const toMs = Date.parse(syncToLocal);
+    if (!Number.isFinite(fromMs) || !Number.isFinite(toMs) || toMs <= fromMs) {
+      return null;
+    }
+    return (toMs - fromMs) / (24 * 60 * 60 * 1000);
+  }, [syncFromLocal, syncToLocal]);
+  const customRangeInvalid =
+    syncMode === 'custom' &&
+    (customRangeDays === null || customRangeDays > 365);
+
   const refreshInfo = async () => {
     if (!apiBaseUrl || !accessToken) return;
     setInfoLoading(true);
@@ -214,6 +240,53 @@ const ZadarmaSettings = () => {
       }
     } catch {
       // Non-fatal — counter just stays hidden if the endpoint is unreachable.
+    }
+  };
+
+  const runSync = async () => {
+    if (!apiBaseUrl || !accessToken || syncing) return;
+    if (customRangeInvalid) return;
+    setSyncing(true);
+    setSyncResult(null);
+    try {
+      const body: { fromIso?: string; toIso?: string } = {};
+      if (syncMode === 'custom') {
+        body.fromIso = new Date(syncFromLocal).toISOString();
+        body.toIso = new Date(syncToLocal).toISOString();
+      }
+      const r = await fetch(`${apiBaseUrl}/s/zadarma/sync-calls`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${accessToken}` },
+        body: JSON.stringify(body),
+      });
+      const json = (await r.json()) as {
+        ok?: boolean;
+        error?: string;
+        fetched?: number;
+        created?: number;
+        skippedDup?: number;
+        linked?: number;
+        failed?: number;
+        windowFrom?: string;
+        windowTo?: string;
+      };
+      if (json.ok) {
+        const window =
+          json.windowFrom && json.windowTo
+            ? ` (${json.windowFrom.slice(0, 16).replace('T', ' ')} → ${json.windowTo.slice(0, 16).replace('T', ' ')} UTC)`
+            : '';
+        setSyncResult(
+          `Created ${json.created ?? 0} new (skipped ${json.skippedDup ?? 0} dup, linked ${json.linked ?? 0}, fetched ${json.fetched ?? 0})${window}.`,
+        );
+        await fetchOrphanCounts();
+        await fetchLastContactedCounts();
+      } else {
+        setSyncResult(`Sync failed: ${json.error ?? 'unknown error'}`);
+      }
+    } catch (e) {
+      setSyncResult(e instanceof Error ? e.message : String(e));
+    } finally {
+      setSyncing(false);
     }
   };
 
@@ -622,6 +695,101 @@ const ZadarmaSettings = () => {
           {rescanResult && (
             <span style={{ fontSize: 12, color: 'var(--t-font-color-secondary)' }}>
               {rescanResult}
+            </span>
+          )}
+        </div>
+      </div>
+
+      {/* ── 4a. Sync calls from Zadarma */}
+      <div style={section}>
+        <div style={sectionTitle}>Sync calls from Zadarma</div>
+        <div style={sectionHelp}>
+          Pulls call history via Zadarma's <code>/v1/statistics/pbx/</code> API and inserts new
+          callLog rows here. Deduplicated by <code>pbxCallId</code>, so re-running is safe and
+          double-counting cannot happen. New rows are auto-linked to Persons by phone (last 9 digits).
+          Default: incremental — fetches everything since the last call we know about (with a 1-hour
+          overlap to catch late-arriving rows). Custom range capped at 1 year.
+          {' '}Rate-limited to 3 requests/min by Zadarma; long ranges run in 31-day chunks
+          (a 1-year range takes ~5 minutes).
+        </div>
+
+        <div style={row}>
+          <span style={labelCol}>Mode</span>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer', marginRight: 16 }}>
+            <input
+              type="radio"
+              name="syncMode"
+              checked={syncMode === 'incremental'}
+              onChange={() => setSyncMode('incremental')}
+              disabled={syncing}
+            />
+            <span style={{ fontSize: 12 }}>Incremental (since last call)</span>
+          </label>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}>
+            <input
+              type="radio"
+              name="syncMode"
+              checked={syncMode === 'custom'}
+              onChange={() => setSyncMode('custom')}
+              disabled={syncing}
+            />
+            <span style={{ fontSize: 12 }}>Custom range</span>
+          </label>
+        </div>
+
+        {syncMode === 'custom' && (
+          <>
+            <div style={row}>
+              <span style={labelCol}>From</span>
+              <input
+                type="datetime-local"
+                value={syncFromLocal}
+                onChange={(e: { detail?: { value?: string } }) => setSyncFromLocal(e.detail?.value ?? '')}
+                disabled={syncing}
+                style={{ flex: 1, padding: '4px 8px', fontSize: 12, fontFamily: 'inherit' }}
+              />
+            </div>
+            <div style={row}>
+              <span style={labelCol}>To</span>
+              <input
+                type="datetime-local"
+                value={syncToLocal}
+                onChange={(e: { detail?: { value?: string } }) => setSyncToLocal(e.detail?.value ?? '')}
+                disabled={syncing}
+                style={{ flex: 1, padding: '4px 8px', fontSize: 12, fontFamily: 'inherit' }}
+              />
+            </div>
+            {customRangeDays !== null && (
+              <div style={{ ...sectionHelp, marginTop: 4, marginBottom: 0, marginLeft: 138 }}>
+                {customRangeDays > 365 ? (
+                  <span style={{ color: 'var(--t-font-color-danger)' }}>
+                    ⚠ Range {customRangeDays.toFixed(1)} days exceeds the 365-day limit. Narrow the window.
+                  </span>
+                ) : (
+                  <span>Range: {customRangeDays.toFixed(1)} days. Times are interpreted in your browser's local timezone.</span>
+                )}
+              </div>
+            )}
+            {customRangeDays === null && syncFromLocal && syncToLocal && (
+              <div style={{ ...sectionHelp, marginTop: 4, marginBottom: 0, marginLeft: 138, color: 'var(--t-font-color-danger)' }}>
+                ⚠ &quot;To&quot; must be after &quot;From&quot;.
+              </div>
+            )}
+          </>
+        )}
+
+        <div style={{ marginTop: 12, display: 'flex', alignItems: 'center', gap: 12 }}>
+          <button
+            type="button"
+            style={button('primary', syncing || customRangeInvalid)}
+            onClick={() => runSync()}
+            disabled={syncing || customRangeInvalid}
+          >
+            {syncing ? 'Syncing…' : 'Sync calls'}
+          </button>
+          {syncResult && (
+            <span style={{ fontSize: 12, color: 'var(--t-font-color-secondary)' }}>
+              {syncResult}
             </span>
           )}
         </div>
