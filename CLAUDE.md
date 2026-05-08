@@ -1,7 +1,7 @@
 # Twenty Zadarma App
 
 Twenty CRM app for Zadarma telephony. **Fully native** — no external services (no N8N, no relay).
-Production: `https://twentycrm-coolify.mikidev.app/`. Local dev: `yarn twenty server start` on `:2020`. `engines.twenty` pinned `>=2.2.0` (bumping the SDK = re-check the minimum).
+Production: `https://twentycrm-coolify.mikidev.app/`. Local dev: `yarn twenty server start` on `:2020`. `engines.twenty` pinned `>=2.3.0` (bumping the SDK = re-check the minimum).
 
 ## Architecture (one paragraph)
 

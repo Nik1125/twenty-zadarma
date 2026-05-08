@@ -16,7 +16,7 @@
     "node": "^24.5.0",
     "npm": "please-use-yarn",
     "yarn": ">=4.0.2",
-    "twenty": ">=2.2.0"
+    "twenty": ">=2.3.0"
   },
   "keywords": [
     "twenty",
@@ -37,8 +37,8 @@
     "test:watch": "vitest"
   },
   "dependencies": {
-    "twenty-client-sdk": "2.2.0",
-    "twenty-sdk": "2.2.0"
+    "twenty-client-sdk": "2.3.0",
+    "twenty-sdk": "2.3.0"
   },
   "devDependencies": {
     "@types/node": "^24.7.2",
