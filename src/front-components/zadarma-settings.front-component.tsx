@@ -781,22 +781,40 @@ const ZadarmaSettings = () => {
           </div>
         )}
 
-        <div style={{ ...row, marginTop: 4 }}>
+        <div style={{ ...row, alignItems: 'flex-start', marginTop: 4 }}>
           <span style={labelCol}>n8n quick start</span>
-          <button
-            type="button"
-            style={button('ghost')}
-            onClick={() => handleCopy('curl', buildEnrichmentCurl(enrichmentWebhookUrl))}
-          >
-            Copy n8n cURL
-          </button>
-          {renderCopyHint('curl')}
-          <span style={{ fontSize: 11, color: 'var(--t-font-color-secondary)' }}>
-            Paste into HTTP Request node → ⋮ menu → "Import cURL". Replace{' '}
-            <code style={{ fontFamily: 'monospace' }}>YOUR_WORKSPACE_API_KEY</code> and{' '}
-            <code style={{ fontFamily: 'monospace' }}>&lt;placeholders&gt;</code> with n8n
-            expressions.
-          </span>
+          <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 4 }}>
+            <span style={{ fontSize: 11, color: 'var(--t-font-color-secondary)' }}>
+              Click the cURL below to copy. Paste into n8n HTTP Request node → ⋮ menu →
+              <strong> Import cURL</strong>. Replace{' '}
+              <code style={{ fontFamily: 'monospace' }}>YOUR_WORKSPACE_API_KEY</code> and{' '}
+              <code style={{ fontFamily: 'monospace' }}>&lt;placeholders&gt;</code> with n8n
+              expressions.
+            </span>
+            <pre
+              style={{
+                ...codeBoxClickable,
+                margin: 0,
+                whiteSpace: 'pre-wrap',
+                wordBreak: 'break-all',
+                fontSize: 11,
+                lineHeight: 1.5,
+                maxHeight: 220,
+                overflow: 'auto',
+              }}
+              title="Click to copy"
+              onClick={(e) =>
+                handleCopy(
+                  'curl',
+                  buildEnrichmentCurl(enrichmentWebhookUrl),
+                  e.currentTarget as HTMLElement,
+                )
+              }
+            >
+              {buildEnrichmentCurl(enrichmentWebhookUrl)}
+            </pre>
+            {renderCopyHint('curl')}
+          </div>
         </div>
 
         <div style={row}>
