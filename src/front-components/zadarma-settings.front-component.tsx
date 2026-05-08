@@ -423,7 +423,13 @@ const ZadarmaSettings = () => {
   // packages/twenty-ui/src/theme-constants/themeCssVariables.ts) so light/dark
   // theme switches in the Twenty UI propagate automatically.
   const container: CSSProperties = {
-    padding: 24, display: 'flex', flexDirection: 'column', gap: 24, fontFamily: 'inherit',
+    padding: 24, display: 'flex', flexDirection: 'column', gap: 24,
+    fontFamily: 'inherit',
+    // Twenty's iframe body colour isn't reliably applied to text inside
+    // <code>/<pre>/<span> children, so they inherit black-ish defaults and
+    // disappear against dark-mode backgrounds. Anchoring the colour here
+    // makes every descendant theme-aware via inheritance.
+    color: 'var(--t-font-color-primary)',
   };
   const section: CSSProperties = {
     background: 'var(--t-background-primary)', borderRadius: 8,

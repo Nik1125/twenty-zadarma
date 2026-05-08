@@ -226,6 +226,10 @@ const ZadarmaPersonPanel = () => {
   const container: CSSProperties = {
     display: 'flex', flexDirection: 'column', height: '100%',
     boxSizing: 'border-box', fontFamily: 'inherit',
+    // Anchor text colour for every descendant — Twenty's iframe body
+    // colour isn't reliably inherited into <code>/<pre>/<span> children,
+    // which made them disappear against dark-mode backgrounds.
+    color: 'var(--t-font-color-primary)',
   };
   const tabsRow: CSSProperties = {
     display: 'flex', gap: 0, padding: '0 12px', borderBottom: '1px solid var(--t-border-color-light)',
