@@ -3,6 +3,7 @@ import { defineFrontComponent } from 'twenty-sdk/define';
 
 import { APPLICATION_UNIVERSAL_IDENTIFIER } from 'src/constants/universal-identifiers';
 import { buildEnrichmentCurl } from 'src/front-components/utils/build-enrichment-curl';
+import { buildSendSmsCurl } from 'src/front-components/utils/build-send-sms-curl';
 import { copyToClipboard } from 'src/front-components/utils/copy-to-clipboard';
 
 export const ZADARMA_SETTINGS_FRONT_COMPONENT_UNIVERSAL_IDENTIFIER =
@@ -64,6 +65,7 @@ const ZadarmaSettings = () => {
   const pbxWebhookUrl = `${apiBaseUrl}/s/zadarma/pbx-webhook`;
   const eventWebhookUrl = `${apiBaseUrl}/s/zadarma-event-webhook`;
   const enrichmentWebhookUrl = `${apiBaseUrl}/s/zadarma/call-enrichment`;
+  const sendSmsWebhookUrl = `${apiBaseUrl}/s/zadarma/send-sms`;
   const enrichmentDocsUrl =
     'https://github.com/Nik1125/twenty-zadarma/blob/main/docs/AI_ENRICHMENT.md';
 
@@ -815,6 +817,109 @@ const ZadarmaSettings = () => {
             docs/AI_ENRICHMENT.md
           </a>
           .
+        </div>
+      </div>
+
+      {/* ── 3b. SMS send endpoint (used by chat panel + n8n / Twenty Workflows) */}
+      <div style={section}>
+        <div style={sectionTitle}>SMS send endpoint</div>
+        <div style={sectionHelp}>
+          Send an outbound SMS through Zadarma and write a corresponding{' '}
+          <code>smsLog</code> row in one HTTP call. The Zadarma chat panel on every
+          Person record uses this endpoint internally; n8n / Twenty Workflows /
+          external automation can hit it directly with the same contract. Honours{' '}
+          <code>Person.doNotSms</code> opt-out automatically and refuses with{' '}
+          <code>OPT_OUT</code> if the flag is set — no charge incurred and no row
+          written. Optional analytics tags (<code>category</code>,{' '}
+          <code>source</code>, <code>templateName</code>, <code>campaignId</code>)
+          let dashboards group sent SMS by type / origin / template / campaign.
+        </div>
+
+        <div style={row}>
+          <span style={labelCol}>URL</span>
+          <code
+            style={codeBoxClickable}
+            onClick={(e) => handleCopy(sendSmsWebhookUrl, e.currentTarget as HTMLElement)}
+          >
+            {sendSmsWebhookUrl}
+          </code>
+        </div>
+
+        <div style={{ ...row, alignItems: 'flex-start', marginTop: 4 }}>
+          <span style={labelCol}>n8n quick start</span>
+          <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 4 }}>
+            <span style={{ fontSize: 11, color: 'var(--t-font-color-secondary)' }}>
+              Paste into n8n HTTP Request node → ⋮ menu → <strong>Import cURL</strong>. Replace{' '}
+              <code style={{ fontFamily: 'monospace' }}>YOUR_WORKSPACE_API_KEY</code> and{' '}
+              <code style={{ fontFamily: 'monospace' }}>&lt;placeholders&gt;</code> with n8n
+              expressions.
+            </span>
+            <pre
+              style={{
+                ...codeBoxClickable,
+                margin: 0,
+                whiteSpace: 'pre-wrap',
+                wordBreak: 'break-all',
+                fontSize: 11,
+                lineHeight: 1.5,
+                maxHeight: 220,
+                overflow: 'auto',
+              }}
+              onClick={(e) =>
+                handleCopy(
+                  buildSendSmsCurl(sendSmsWebhookUrl),
+                  e.currentTarget as HTMLElement,
+                )
+              }
+            >
+              {buildSendSmsCurl(sendSmsWebhookUrl)}
+            </pre>
+          </div>
+        </div>
+
+        <div style={row}>
+          <span style={labelCol}>Method</span>
+          <code style={{ fontFamily: 'monospace', fontSize: 12 }}>POST</code>
+        </div>
+
+        <div style={row}>
+          <span style={labelCol}>Auth</span>
+          <span style={{ fontSize: 12 }}>
+            <code style={{ fontFamily: 'monospace' }}>Bearer &lt;workspace API key&gt;</code> — create
+            one in <strong>Settings → Developers → API Keys</strong>. <strong>Do not</strong> use
+            this App's own token — it has narrower scope and is rotated on App reinstall.
+          </span>
+        </div>
+
+        <div style={row}>
+          <span style={labelCol}>Body</span>
+          <span style={{ fontSize: 12 }}>
+            <code style={{ fontFamily: 'monospace' }}>
+              {'{ to, from, message, personId?, category?, source?, templateName?, campaignId? }'}
+            </code>
+            {' '}— urlencoded or JSON. <code style={{ fontFamily: 'monospace' }}>category</code> ∈{' '}
+            <code>TRANSACTIONAL / MARKETING / REMINDER / FOLLOWUP / CONFIRMATION / OTHER</code>;{' '}
+            <code style={{ fontFamily: 'monospace' }}>source</code> ∈{' '}
+            <code>CHAT_PANEL / N8N / TWENTY_WORKFLOW / EXTERNAL_API / INBOUND / OTHER</code>. Unknown
+            enum values gracefully fall back to <code>OTHER</code> instead of failing the send.
+            Free-form fields are trimmed; empty strings collapse to null.
+          </span>
+        </div>
+
+        <div style={row}>
+          <span style={labelCol}>Refused</span>
+          <span style={{ fontSize: 12 }}>
+            Returns <code style={{ fontFamily: 'monospace' }}>{'{ ok: false, error: "OPT_OUT" }'}</code>
+            {' '}with no Zadarma call and no <code>smsLog</code> row when the target Person has{' '}
+            <code>doNotSms = true</code>. The chat panel mirrors this with a banner; external
+            callers should surface the same to operators.
+          </span>
+        </div>
+
+        <div style={{ ...sectionHelp, marginTop: 8, marginBottom: 0 }}>
+          The four analytics tags are also returned on every <code>smsLog</code> row, so
+          group_by analytics in Twenty's list view (e.g. by <code>source</code> or{' '}
+          <code>category</code>) work natively without any extra setup.
         </div>
       </div>
 

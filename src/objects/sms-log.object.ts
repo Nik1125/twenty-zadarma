@@ -23,6 +23,14 @@ export const SMS_LOG_BODY_FIELD_UNIVERSAL_IDENTIFIER =
   '54a7e9bb-ceda-438e-a6b0-c16a52bf52c3';
 export const SMS_LOG_COST_FIELD_UNIVERSAL_IDENTIFIER =
   '541372c9-2150-4738-abc7-1e01b8a15ed6';
+export const SMS_LOG_CATEGORY_FIELD_UNIVERSAL_IDENTIFIER =
+  'e04c3431-f82a-4fd9-96d8-5cebd449768b';
+export const SMS_LOG_SOURCE_FIELD_UNIVERSAL_IDENTIFIER =
+  '7d79bb1e-0c94-499d-b523-615594d5ed87';
+export const SMS_LOG_TEMPLATE_NAME_FIELD_UNIVERSAL_IDENTIFIER =
+  'dfa33e5c-64dd-4227-93a4-64d5f7e2745f';
+export const SMS_LOG_CAMPAIGN_ID_FIELD_UNIVERSAL_IDENTIFIER =
+  '589a8bac-a653-4d97-b669-00164906614d';
 
 export default defineObject({
   universalIdentifier: SMS_LOG_OBJECT_UNIVERSAL_IDENTIFIER,
@@ -157,6 +165,62 @@ export default defineObject({
       label: 'Cost',
       description: 'Cost of the SMS as reported by Zadarma',
       icon: 'IconCurrencyDollar',
+      isNullable: true,
+    },
+    {
+      universalIdentifier: SMS_LOG_CATEGORY_FIELD_UNIVERSAL_IDENTIFIER,
+      type: FieldType.SELECT,
+      name: 'category',
+      label: 'Category',
+      description:
+        'Coarse "what kind of message" tag for analytics. Populated by the caller on /send-sms; defaults to OTHER. Inbound rows also default to OTHER until an external classifier (e.g. n8n LLM) PATCHes a more meaningful value.',
+      icon: 'IconCategory',
+      defaultValue: "'OTHER'",
+      options: [
+        { id: '483bf407-968f-4c66-81fe-be292331e973', value: 'TRANSACTIONAL', label: 'Transactional', position: 0, color: 'blue' },
+        { id: '579ca866-cc20-466f-bbbe-29b0747ed667', value: 'MARKETING', label: 'Marketing', position: 1, color: 'purple' },
+        { id: 'dfe1c2c4-8949-4bd2-bfda-4b1c24ad0ae2', value: 'REMINDER', label: 'Reminder', position: 2, color: 'yellow' },
+        { id: 'b2f3192e-28bc-4740-9281-aa35ed0d7b3c', value: 'FOLLOWUP', label: 'Follow-up', position: 3, color: 'orange' },
+        { id: '696b22a3-023d-41b2-b0a5-f36340bfada2', value: 'CONFIRMATION', label: 'Confirmation', position: 4, color: 'green' },
+        { id: 'fdd8bd29-afc2-4f20-86b1-f5946ccae090', value: 'OTHER', label: 'Other', position: 5, color: 'gray' },
+      ],
+    },
+    {
+      universalIdentifier: SMS_LOG_SOURCE_FIELD_UNIVERSAL_IDENTIFIER,
+      type: FieldType.SELECT,
+      name: 'source',
+      label: 'Source',
+      description:
+        'Who triggered the send. Hard-coded by the chat panel (CHAT_PANEL) and by the inbound webhook (INBOUND); supplied explicitly by external callers (n8n, Twenty Workflow, curl). Substitute for createdBy, which always reports the App actor because /send-sms is the middleman.',
+      icon: 'IconSend',
+      defaultValue: "'OTHER'",
+      options: [
+        { id: '1fbc4f25-fba7-44da-ba2e-684483b91c50', value: 'CHAT_PANEL', label: 'Chat panel', position: 0, color: 'blue' },
+        { id: 'b8de0334-de78-49b6-8249-537eda8a7c45', value: 'N8N', label: 'n8n', position: 1, color: 'purple' },
+        { id: 'd2cf994a-4048-4fe9-aa19-8cad47f81cb2', value: 'TWENTY_WORKFLOW', label: 'Twenty Workflow', position: 2, color: 'turquoise' },
+        { id: '559c6be4-c92b-4945-bb60-49d5f46b1c92', value: 'EXTERNAL_API', label: 'External API', position: 3, color: 'orange' },
+        { id: '3efc05b8-1b5e-4b1b-bbde-af47f18460ca', value: 'INBOUND', label: 'Inbound', position: 4, color: 'green' },
+        { id: '2d891ab3-ada5-484c-950a-09f02ce41cbf', value: 'OTHER', label: 'Other', position: 5, color: 'gray' },
+      ],
+    },
+    {
+      universalIdentifier: SMS_LOG_TEMPLATE_NAME_FIELD_UNIVERSAL_IDENTIFIER,
+      type: FieldType.TEXT,
+      name: 'templateName',
+      label: 'Template name',
+      description:
+        'Free-form caller-defined identifier of the template that produced the body (e.g. appointment_reminder_pl). Project-specific naming lives here; the app stays neutral.',
+      icon: 'IconFileText',
+      isNullable: true,
+    },
+    {
+      universalIdentifier: SMS_LOG_CAMPAIGN_ID_FIELD_UNIVERSAL_IDENTIFIER,
+      type: FieldType.TEXT,
+      name: 'campaignId',
+      label: 'Campaign ID',
+      description:
+        'Free-form batch identifier for marketing rollouts (e.g. spring_2026_promo). Lets analytics group by campaign without a dedicated object.',
+      icon: 'IconHash',
       isNullable: true,
     },
   ],
