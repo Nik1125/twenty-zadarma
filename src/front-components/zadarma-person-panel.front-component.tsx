@@ -165,6 +165,7 @@ const ZadarmaPersonPanel = () => {
   }, [smsLogs, callLogs, defaultSenderDid]);
 
   const isOptOut = person?.doNotSms === true;
+  const hasSenderDid = lastOurNumber.trim().length > 0;
 
   const fetchData = async () => {
     if (personId === null) {
@@ -386,6 +387,21 @@ const ZadarmaPersonPanel = () => {
               ) : null}
             </div>
           ) : null}
+          {!isOptOut && !hasSenderDid ? (
+            <div style={{
+              padding: '10px 12px',
+              background: 'var(--t-background-transparent-orange)',
+              fontSize: 12,
+              color: 'var(--t-font-color-primary)',
+              borderBottom: '1px solid var(--t-border-color-light)',
+              lineHeight: 1.4,
+            }}>
+              <span style={{ fontWeight: 600 }}>No sender number. </span>
+              <span>
+                Set <code>DEFAULT_SENDER_DID</code> in Settings → Applications → Zadarma, or pick the DID dropdown in the custom Zadarma Settings tab. Sending is disabled until a sender number is configured.
+              </span>
+            </div>
+          ) : null}
           <div style={{
             display: 'flex', gap: 8, padding: 12, alignItems: 'flex-end',
           }}>
@@ -397,7 +413,7 @@ const ZadarmaPersonPanel = () => {
               so the heuristic counts hard newlines only — wrapped long lines
               just expand the scrollbar inside the same row. */}
           <textarea
-            placeholder={isOptOut ? 'Sending disabled — contact opted out' : 'Type a message…'}
+            placeholder={isOptOut ? 'Sending disabled — contact opted out' : !hasSenderDid ? 'Sending disabled — no sender DID' : 'Type a message…'}
             value={messageText}
             rows={Math.min(4, Math.max(1, messageText.split('\n').length))}
             onChange={(e: { detail?: { value?: string } }) => {
@@ -406,7 +422,7 @@ const ZadarmaPersonPanel = () => {
             onInput={(e: { detail?: { value?: string } }) => {
               setMessageText(e.detail?.value ?? '');
             }}
-            disabled={sending || isOptOut}
+            disabled={sending || isOptOut || !hasSenderDid}
             style={{
               flex: 1, padding: '8px 12px',
               border: '1px solid var(--t-border-color-medium)',
@@ -414,12 +430,12 @@ const ZadarmaPersonPanel = () => {
               background: 'var(--t-background-primary)',
               color: 'var(--t-font-color-primary)',
               lineHeight: 1.4, resize: 'none',
-              opacity: sending || isOptOut ? 0.6 : 1,
+              opacity: sending || isOptOut || !hasSenderDid ? 0.6 : 1,
             }}
           />
           <button
             type="button"
-            disabled={sending || isOptOut || !messageText.trim()}
+            disabled={sending || isOptOut || !hasSenderDid || !messageText.trim()}
             onClick={async () => {
               setSendError(null);
               setSending(true);
@@ -459,9 +475,9 @@ const ZadarmaPersonPanel = () => {
             }}
             style={{
               padding: '8px 16px', border: 'none',
-              background: sending || isOptOut || !messageText.trim() ? 'var(--t-background-tertiary)' : 'var(--t-color-blue)',
+              background: sending || isOptOut || !hasSenderDid || !messageText.trim() ? 'var(--t-background-tertiary)' : 'var(--t-color-blue)',
               color: 'var(--t-font-color-inverted)', borderRadius: 6,
-              cursor: sending || isOptOut || !messageText.trim() ? 'not-allowed' : 'pointer',
+              cursor: sending || isOptOut || !hasSenderDid || !messageText.trim() ? 'not-allowed' : 'pointer',
               fontSize: 13, fontWeight: 500,
             }}
           >
