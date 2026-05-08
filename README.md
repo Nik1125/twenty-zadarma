@@ -156,6 +156,21 @@ zadarma-person-panel ─────────────┘  (Twenty App, ru
 | `zadarma-person-panel` front-component | SMS chat panel — pinned Command + Person record-show tab |
 | `zadarma-settings` front-component | custom Settings tab |
 
+## Legal & data protection
+
+This app provides **technical primitives** — `callLog` / `smsLog` records, opt-out flags (`Person.doNotCall`, `Person.doNotSms` — the latter ships in `v0.14.0`), and outbound send guards. **It does not establish, validate, or imply a lawful basis for any outreach.**
+
+The lawful basis for contacting individuals — under GDPR (EU) 2016/679 and equivalent national regimes (e.g. Polish Article 172 of the Telecommunications Act for SMS / call marketing) — is the responsibility of the **data controller** operating the Twenty workspace. That includes (non-exhaustive):
+
+- Capturing a valid lawful basis at the point of lead acquisition (Facebook Lead Form default consent typically covers a single-purpose follow-up only — generic marketing requires a separate explicit opt-in).
+- Maintaining proof of consent with timestamp and source.
+- Honouring opt-out requests across all channels.
+- Documenting any reactivation of previously opted-out contacts (a fresh ad click does **not** by itself revoke a prior opt-out).
+
+The app's `send-sms` (and future `send-template`) endpoints **respect** the `Person.doNotCall` / `Person.doNotSms` flags and refuse to send when set. Populating those flags — from inbound SMS / email / spoken request during a call / manual operator action — is the workspace operator's responsibility, typically via a separate ingestion pipeline (n8n + LLM intent classification, native Twenty Workflow, or manual entry).
+
+Operators integrating this app at scale are encouraged to consult a privacy specialist familiar with their local marketing-communications regime before launching outbound campaigns.
+
 ## Migration / Import
 
 Migrate historical calls and SMS from Zadarma (or any other source) via vendor-specific transformers that emit a canonical CSV ingestible by Twenty's built-in Import. See [`docs/IMPORT.md`](./docs/IMPORT.md) for the playbook and [`scripts/transformers/`](./scripts/transformers/) for the existing adapters.
