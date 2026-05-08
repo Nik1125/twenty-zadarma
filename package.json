@@ -1,6 +1,6 @@
 {
   "name": "twenty-zadarma",
-  "version": "0.12.0",
+  "version": "0.13.0",
   "description": "Twenty CRM app for Zadarma telephony: inbound/outbound calls and SMS, transcripts, native send-from-Person panel, custom Settings UI",
   "license": "MIT",
   "author": "Nikita Aleksyeyenko <aleksyeyenko.nikita@gmail.com>",
