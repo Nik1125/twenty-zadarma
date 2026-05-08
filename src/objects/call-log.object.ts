@@ -31,6 +31,20 @@ export const CALL_LOG_COST_FIELD_UNIVERSAL_IDENTIFIER =
   'fee938b8-0ba0-419d-b66e-5f6eb3f4e227';
 export const CALL_LOG_CALL_PATH_FIELD_UNIVERSAL_IDENTIFIER =
   '0d7986c5-10f2-47c8-93e2-e3d8c3d2e26f';
+export const CALL_LOG_AI_VENDOR_FIELD_UNIVERSAL_IDENTIFIER =
+  '7e2d8a91-3c4f-4b15-9e02-1f6a8d3e4c12';
+export const CALL_LOG_AI_AGENT_NAME_FIELD_UNIVERSAL_IDENTIFIER =
+  'b3f9c47e-2a18-4d65-8c91-5e7f3a9b2d04';
+export const CALL_LOG_AI_SENTIMENT_FIELD_UNIVERSAL_IDENTIFIER =
+  '4c8e1d23-9f56-4a72-b30e-6d8c5f4a1b97';
+export const CALL_LOG_AI_SUCCESSFUL_FIELD_UNIVERSAL_IDENTIFIER =
+  'a7d2f834-5b6c-4e91-9234-1f8e6c3d9b25';
+export const CALL_LOG_AI_TRANSFERRED_FIELD_UNIVERSAL_IDENTIFIER =
+  'e9b6f124-7d83-4c25-a614-3f5d9e2c8a07';
+export const CALL_LOG_AI_COST_FIELD_UNIVERSAL_IDENTIFIER =
+  '8d3a5b62-1f47-4e98-b2c5-7e9d4a6c3f81';
+export const CALL_LOG_CORRELATION_ID_FIELD_UNIVERSAL_IDENTIFIER =
+  '6b1e9c34-4d27-4f58-a803-2e9c8f5b7d61';
 
 export default defineObject({
   universalIdentifier: CALL_LOG_OBJECT_UNIVERSAL_IDENTIFIER,
@@ -215,6 +229,105 @@ export default defineObject({
       label: 'Call path',
       description: 'Raw chain of call legs from CSV import (extensions, voicemail steps)',
       icon: 'IconRoute',
+      isNullable: true,
+    },
+    {
+      universalIdentifier: CALL_LOG_AI_VENDOR_FIELD_UNIVERSAL_IDENTIFIER,
+      type: FieldType.TEXT,
+      name: 'aiVendor',
+      label: 'AI vendor',
+      description:
+        'Vendor that produced the AI analysis on this call (e.g. "retell", "vapi"). Set by the n8n adapter via /zadarma/call-enrichment.',
+      icon: 'IconRobot',
+      isNullable: true,
+    },
+    {
+      universalIdentifier: CALL_LOG_AI_AGENT_NAME_FIELD_UNIVERSAL_IDENTIFIER,
+      type: FieldType.TEXT,
+      name: 'aiAgentName',
+      label: 'AI agent',
+      description:
+        'Vendor-side agent identifier or display name (e.g. Retell agent_name). Useful for per-agent dashboards.',
+      icon: 'IconUser',
+      isNullable: true,
+    },
+    {
+      universalIdentifier: CALL_LOG_AI_SENTIMENT_FIELD_UNIVERSAL_IDENTIFIER,
+      type: FieldType.SELECT,
+      name: 'aiSentiment',
+      label: 'AI sentiment',
+      description: 'User sentiment as classified by the AI vendor.',
+      icon: 'IconMoodSmile',
+      isNullable: true,
+      options: [
+        {
+          id: 'd5f8a134-7b29-4e83-a651-9c4d8e2f3b07',
+          value: 'POSITIVE',
+          label: 'Positive',
+          position: 0,
+          color: 'green',
+        },
+        {
+          id: 'b2e7c945-8a36-4d72-9c50-1f3d4e8b7a92',
+          value: 'NEGATIVE',
+          label: 'Negative',
+          position: 1,
+          color: 'red',
+        },
+        {
+          id: 'a9c4f681-3e75-4b29-8d04-7f2c5a9e3b14',
+          value: 'NEUTRAL',
+          label: 'Neutral',
+          position: 2,
+          color: 'gray',
+        },
+        {
+          id: 'f3b1d847-2c69-4a85-9e34-8d5c7f1b2a96',
+          value: 'UNKNOWN',
+          label: 'Unknown',
+          position: 3,
+          color: 'orange',
+        },
+      ],
+    },
+    {
+      universalIdentifier: CALL_LOG_AI_SUCCESSFUL_FIELD_UNIVERSAL_IDENTIFIER,
+      type: FieldType.BOOLEAN,
+      name: 'aiSuccessful',
+      label: 'AI successful',
+      description:
+        'Did the AI agent reach its goal in the call (vendor self-assessment)? Null if not analysed.',
+      icon: 'IconCircleCheck',
+      isNullable: true,
+    },
+    {
+      universalIdentifier: CALL_LOG_AI_TRANSFERRED_FIELD_UNIVERSAL_IDENTIFIER,
+      type: FieldType.BOOLEAN,
+      name: 'aiTransferred',
+      label: 'AI transferred',
+      description:
+        'True if the AI agent escalated the call to a human or another agent. Useful for AI-vs-human comparison dashboards.',
+      icon: 'IconArrowsExchange',
+      isNullable: true,
+    },
+    {
+      universalIdentifier: CALL_LOG_AI_COST_FIELD_UNIVERSAL_IDENTIFIER,
+      type: FieldType.CURRENCY,
+      name: 'aiCost',
+      label: 'AI cost',
+      description:
+        "AI vendor's billed cost for this call (LLM tokens, TTS, voice engine). Separate from telecom `cost` so total = cost + aiCost.",
+      icon: 'IconBrain',
+      isNullable: true,
+    },
+    {
+      universalIdentifier: CALL_LOG_CORRELATION_ID_FIELD_UNIVERSAL_IDENTIFIER,
+      type: FieldType.TEXT,
+      name: 'correlationId',
+      label: 'Correlation ID',
+      description:
+        'Vendor-side call identifier (e.g. Retell call_id). Used as the idempotent join key for re-runs of /zadarma/call-enrichment. Vendor-raw debug data (tool calls, latency, transcripts) lives in a Note linked to this callLog via noteTargets, not on the callLog itself.',
+      icon: 'IconLink',
       isNullable: true,
     },
   ],

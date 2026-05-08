@@ -4,9 +4,11 @@ import { ZADARMA_SETTINGS_FRONT_COMPONENT_UNIVERSAL_IDENTIFIER } from 'src/front
 
 import {
   ACTIVE_CALL_COOLDOWN_MINUTES_VARIABLE_UNIVERSAL_IDENTIFIER,
+  AI_EXTENSIONS_VARIABLE_UNIVERSAL_IDENTIFIER,
   APP_DESCRIPTION,
   APP_DISPLAY_NAME,
   APPLICATION_UNIVERSAL_IDENTIFIER,
+  CALL_ENRICHMENT_WINDOW_SECONDS_VARIABLE_UNIVERSAL_IDENTIFIER,
   DEFAULT_ROLE_UNIVERSAL_IDENTIFIER,
   DEFAULT_SENDER_DID_VARIABLE_UNIVERSAL_IDENTIFIER,
   ZADARMA_CABINET_TIMEZONE_VARIABLE_UNIVERSAL_IDENTIFIER,
@@ -70,6 +72,27 @@ export default defineApplication({
       description:
         '[Manage in Custom tab] Minutes a Person stays in active-call cooldown after a call ends. Consumers (n8n / Retell / click-to-call) honour this to avoid back-to-back dials. Default: 5.',
       value: '5',
+    },
+    // Comma-separated list of internal extensions that route to AI agents
+    // (e.g. "103,105"). Used by /zadarma/call-enrichment to narrow the
+    // fuzzy callLog match — only OUT calls from these extensions are
+    // candidates for AI enrichment, removing false matches with human
+    // operator calls. Empty = no extension filter (less precise).
+    AI_EXTENSIONS: {
+      universalIdentifier: AI_EXTENSIONS_VARIABLE_UNIVERSAL_IDENTIFIER,
+      description:
+        '[Manage in Custom tab] Comma-separated internal extensions that route to AI agents (e.g. "103,105"). Helps /zadarma/call-enrichment filter AI calls from human operator calls. Empty = no extension filter.',
+      value: '',
+    },
+    // Default time window (seconds) used by /zadarma/call-enrichment when
+    // matching an inbound enrichment payload to an existing callLog by
+    // start/end timestamp. Vendor adapters (Retell ~60s, Vapi ~30s) can
+    // override per-request via match.windowSeconds. Range: 1-600.
+    CALL_ENRICHMENT_WINDOW_SECONDS: {
+      universalIdentifier: CALL_ENRICHMENT_WINDOW_SECONDS_VARIABLE_UNIVERSAL_IDENTIFIER,
+      description:
+        '[Manage in Custom tab] Default ± window (seconds) for fuzzy match in /zadarma/call-enrichment. Adapters can override per-request via match.windowSeconds. Default: 90, range 1-600.',
+      value: '90',
     },
   },
 });
