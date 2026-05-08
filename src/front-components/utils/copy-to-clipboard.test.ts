@@ -1,11 +1,15 @@
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { copyToClipboard } from './copy-to-clipboard';
 
-// vitest runs in a node-only environment; the exec-command and selected-only
-// branches require a real DOM and are exercised by browser smoke tests
-// (light + dark theme) instead. The clipboard-api and failed branches both
-// short-circuit before touching `document`, so they unit-test cleanly here.
+// vitest runs in a node-only env (no DOM). The select-target branches need
+// a real `window`/`document`/`Range` and are exercised by the browser smoke
+// test in the PR. Here we only test what survives without DOM:
+//   - With no target and no DOM: returns 'no-target' regardless of whether
+//     the clipboard API is available.
+//   - When the clipboard API is present but rejects: still returns
+//     'no-target' (programmatic copy is fire-and-forget, never affects
+//     outcome).
 
 const ORIGINAL_CLIPBOARD = (
   globalThis as unknown as { navigator?: { clipboard?: unknown } }
@@ -29,10 +33,6 @@ const setNavigatorClipboard = (
 };
 
 describe('copyToClipboard', () => {
-  beforeEach(() => {
-    setNavigatorClipboard(null);
-  });
-
   afterEach(() => {
     if (ORIGINAL_CLIPBOARD !== undefined) {
       setNavigatorClipboard(
@@ -44,25 +44,25 @@ describe('copyToClipboard', () => {
     vi.restoreAllMocks();
   });
 
-  it('returns clipboard-api when navigator.clipboard.writeText succeeds', async () => {
+  it('returns no-target when no target is supplied', async () => {
+    setNavigatorClipboard(null);
+    const outcome = await copyToClipboard('hello');
+    expect(outcome).toBe('no-target');
+  });
+
+  it('still attempts programmatic clipboard write when clipboard API present', async () => {
     const writeText = vi.fn().mockResolvedValue(undefined);
     setNavigatorClipboard({ writeText });
     const outcome = await copyToClipboard('hello');
-    expect(outcome).toBe('clipboard-api');
     expect(writeText).toHaveBeenCalledWith('hello');
+    // No target supplied — outcome reports selection state, not write success
+    expect(outcome).toBe('no-target');
   });
 
-  it('returns failed when both clipboard API and document are absent', async () => {
-    // node test env has no `document`; clipboard removed in beforeEach
-    const outcome = await copyToClipboard('nope');
-    expect(outcome).toBe('failed');
-  });
-
-  it('returns failed when clipboard API rejects and document is absent', async () => {
-    const writeText = vi.fn().mockRejectedValue(new Error('blocked by policy'));
+  it('does not throw when clipboard API rejects', async () => {
+    const writeText = vi.fn().mockRejectedValue(new Error('blocked'));
     setNavigatorClipboard({ writeText });
-    const outcome = await copyToClipboard('nope');
-    expect(outcome).toBe('failed');
+    await expect(copyToClipboard('hello')).resolves.toBe('no-target');
     expect(writeText).toHaveBeenCalled();
   });
 });

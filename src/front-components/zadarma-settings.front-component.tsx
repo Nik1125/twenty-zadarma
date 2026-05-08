@@ -417,25 +417,24 @@ const ZadarmaSettings = () => {
     }
   };
 
-  // Copies `text` and flashes a "✓ copied" hint near the element identified by
-  // `key`. Uses the multi-strategy helper that survives iframe sandboxing.
+  // Selects the element's text and best-effort attempts a programmatic copy.
+  // We never claim "copied" because Twenty's iframe sandbox can silently
+  // no-op the underlying clipboard write — see copy-to-clipboard.ts. The
+  // hint always tells the user to press Ctrl/⌘+C; if the browser DID copy
+  // automatically, that keystroke is harmless (re-copies the same text).
   const handleCopy = async (
     key: string,
     text: string,
     target?: HTMLElement | null,
   ) => {
-    const outcome = await copyToClipboard(text, target);
+    await copyToClipboard(text, target);
     if (copyResetTimer.current) clearTimeout(copyResetTimer.current);
     setCopiedKey(key);
-    setCopyHint(
-      outcome === 'selected-only' || outcome === 'failed'
-        ? 'press Ctrl/⌘+C'
-        : 'copied',
-    );
+    setCopyHint('selected — press Ctrl/⌘+C');
     copyResetTimer.current = setTimeout(() => {
       setCopiedKey(null);
       setCopyHint('');
-    }, 1500);
+    }, 4000);
   };
 
   // ── styles
@@ -485,7 +484,7 @@ const ZadarmaSettings = () => {
 
   const renderCopyHint = (key: string) =>
     copiedKey === key ? (
-      <span style={badge('var(--t-color-green)')}>✓ {copyHint}</span>
+      <span style={badge('var(--t-color-blue)')}>{copyHint}</span>
     ) : null;
 
   const linkStyle: CSSProperties = { color: 'var(--t-color-blue)', textDecoration: 'underline' };
@@ -702,9 +701,11 @@ const ZadarmaSettings = () => {
           ): the "O połączeniach / Call notifications" URL field gets the PBX URL below; the
           "O zdarzeniach / Event notifications" URL field gets the Events URL.
           The Test buttons below ping each endpoint with a <code>zd_echo</code> handshake from your browser — green means
-          the endpoint logic works. Click any URL to copy. <strong>Important:</strong> Zadarma's own "Test" button
-          in their cabinet pings from the public internet, so the URL must be publicly reachable. On localhost you
-          need a tunnel (cloudflared / ngrok); on Coolify or any cloud Twenty install it works directly.
+          the endpoint logic works. Click any URL to <strong>select it</strong>, then press <code>Ctrl/⌘+C</code> to
+          copy (Twenty's iframe sandbox blocks programmatic clipboard writes on some hosts).
+          <strong> Important:</strong> Zadarma's own "Test" button in their cabinet pings from the public internet, so
+          the URL must be publicly reachable. On localhost you need a tunnel (cloudflared / ngrok); on Coolify or any
+          cloud Twenty install it works directly.
         </div>
 
         <div style={{ marginBottom: 12 }}>
@@ -749,10 +750,9 @@ const ZadarmaSettings = () => {
           Endpoint that accepts post-call AI analysis from any vendor (Retell via n8n, Vapi, etc.)
           and attaches it to the matching <code>callLog</code> row. Idempotent via{' '}
           <code>correlationId</code>. Reachable from the public internet on any cloud Twenty install
-          — point your n8n / vendor adapter at the URL below. Click the URL to copy. The Test
-          button validates registration using this App's own token (no workspace key required for
-          the test). The <strong>Copy n8n cURL</strong> button puts a paste-ready cURL on your
-          clipboard — drop it into n8n's HTTP Request node via "Import cURL" to scaffold the call.
+          — point your n8n / vendor adapter at the URL below. Click any text block below to select
+          it, then press <code>Ctrl/⌘+C</code> to copy. The Test button validates registration
+          using this App's own token (no workspace key required for the test).
         </div>
 
         <div style={row}>
@@ -785,8 +785,8 @@ const ZadarmaSettings = () => {
           <span style={labelCol}>n8n quick start</span>
           <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 4 }}>
             <span style={{ fontSize: 11, color: 'var(--t-font-color-secondary)' }}>
-              Click the cURL below to copy. Paste into n8n HTTP Request node → ⋮ menu →
-              <strong> Import cURL</strong>. Replace{' '}
+              Click the cURL below to select it, then press <code>Ctrl/⌘+C</code> to copy. Paste
+              into n8n HTTP Request node → ⋮ menu → <strong>Import cURL</strong>. Replace{' '}
               <code style={{ fontFamily: 'monospace' }}>YOUR_WORKSPACE_API_KEY</code> and{' '}
               <code style={{ fontFamily: 'monospace' }}>&lt;placeholders&gt;</code> with n8n
               expressions.
