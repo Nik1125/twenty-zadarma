@@ -13,7 +13,11 @@ export default definePageLayoutTab({
   pageLayoutUniversalIdentifier:
     STANDARD_PERSON_PAGE_LAYOUT_UNIVERSAL_IDENTIFIER,
   title: 'Zadarma',
-  position: 1000,
+  // Slot between standard Notes (40) and Files (50). Standard order
+  // upstream: Home 10, Timeline 20, Tasks 30, Notes 40, Files 50,
+  // Emails 60, Calendar 70 — see twenty-server's
+  // standard-page-layout-tabs.template.ts.
+  position: 45,
   icon: 'IconPhone',
   layoutMode: PageLayoutTabLayoutMode.CANVAS,
   widgets: [
