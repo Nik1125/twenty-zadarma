@@ -429,6 +429,7 @@ const ZadarmaPersonPanel = () => {
                   from: lastOurNumber,
                   message: messageText,
                   personId: personId ?? '',
+                  source: 'CHAT_PANEL',
                 }).toString();
                 const accessToken = process.env.TWENTY_APP_ACCESS_TOKEN;
                 const r = await fetch(submitUrl, {

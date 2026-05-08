@@ -267,6 +267,10 @@ const handleInboundSms = async (
           ourNumber,
           body: text,
           personId,
+          // Tag inbound rows so analytics can split inbound/outbound by
+          // source. category stays at its OTHER default — n8n LLM
+          // classifier may PATCH it to a more specific value later.
+          source: 'INBOUND',
         },
       },
       id: true,

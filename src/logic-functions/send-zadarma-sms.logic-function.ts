@@ -9,6 +9,7 @@ import {
   isOptedOutOfSms,
 } from 'src/modules/zadarma/utils/is-opted-out-of-sms';
 import { normalizePhone } from 'src/modules/zadarma/utils/normalize-phone';
+import { parseSmsAnalyticsTags } from 'src/modules/zadarma/utils/parse-sms-analytics-tags';
 import { updateLastContactedIfNewer } from 'src/modules/zadarma/utils/update-last-contacted';
 
 type SendSmsRequest = {
@@ -26,6 +27,12 @@ type SendSmsRequest = {
   personId?: string;
   // Optional: language hint for transliteration (e.g. 'ru', 'en')
   language?: string;
+  // Optional analytics tags persisted on the resulting smsLog. Defaults
+  // applied by parseSmsAnalyticsTags when absent.
+  category?: string;
+  source?: string;
+  templateName?: string;
+  campaignId?: string;
 };
 
 type ZadarmaSmsSendResponse = {
@@ -64,6 +71,10 @@ const innerHandler = async (
       message: params.get('message') ?? undefined,
       personId: params.get('personId') ?? undefined,
       language: params.get('language') ?? undefined,
+      category: params.get('category') ?? undefined,
+      source: params.get('source') ?? undefined,
+      templateName: params.get('templateName') ?? undefined,
+      campaignId: params.get('campaignId') ?? undefined,
     };
   } else {
     debug.push('[body-parse] already-parsed object');
@@ -175,6 +186,16 @@ const innerHandler = async (
   const isSuccess = data.status === 'success';
   const sentAt = new Date().toISOString();
 
+  const tags = parseSmsAnalyticsTags({
+    category: body.category,
+    source: body.source,
+    templateName: body.templateName,
+    campaignId: body.campaignId,
+  });
+  debug.push(
+    `[tags] category=${tags.category} source=${tags.source} template=${tags.templateName ?? '-'} campaign=${tags.campaignId ?? '-'}`,
+  );
+
   const created = (await client.mutation({
     createSmsLog: {
       __args: {
@@ -188,6 +209,10 @@ const innerHandler = async (
           clientNumber: number,
           ourNumber,
           body: message,
+          category: tags.category,
+          source: tags.source,
+          templateName: tags.templateName,
+          campaignId: tags.campaignId,
           ...(isSuccess && data.cost !== undefined && data.currency
             ? {
                 cost: {
