@@ -61,11 +61,15 @@ const ZadarmaSettings = () => {
 
   const pbxWebhookUrl = `${apiBaseUrl}/s/zadarma/pbx-webhook`;
   const eventWebhookUrl = `${apiBaseUrl}/s/zadarma-event-webhook`;
+  const enrichmentWebhookUrl = `${apiBaseUrl}/s/zadarma/call-enrichment`;
+  const enrichmentDocsUrl =
+    'https://github.com/Nik1125/twenty-zadarma/blob/main/docs/AI_ENRICHMENT.md';
 
   const [info, setInfo] = useState<ZadarmaInfo | null>(null);
   const [infoLoading, setInfoLoading] = useState(false);
   const [pbxCheck, setPbxCheck] = useState<WebhookCheck>({ status: 'idle' });
   const [eventCheck, setEventCheck] = useState<WebhookCheck>({ status: 'idle' });
+  const [enrichCheck, setEnrichCheck] = useState<WebhookCheck>({ status: 'idle' });
 
   const [appId, setAppId] = useState<string | null>(null);
   const [defaultSenderDid, setDefaultSenderDid] = useState<string>('');
@@ -368,6 +372,42 @@ const ZadarmaSettings = () => {
     }
   };
 
+  // Validates the AI enrichment endpoint registration without requiring a real
+  // workspace API key: posts a dummy body (toNumber that won't match any
+  // callLog) using the App's own access token. A 200 with `matched:false` is
+  // the success signal — the endpoint executed, auth passed, no row matched.
+  const testEnrichmentWebhook = async () => {
+    if (!apiBaseUrl || !accessToken) {
+      setEnrichCheck({ status: 'fail', detail: 'access token not available in this context' });
+      return;
+    }
+    setEnrichCheck({ status: 'pending' });
+    try {
+      const r = await fetch(enrichmentWebhookUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${accessToken}` },
+        body: JSON.stringify({ match: { toNumber: '+00000000000' } }),
+      });
+      const json = (await r.json().catch(() => null)) as
+        | { ok?: boolean; matched?: boolean; error?: string; reason?: string }
+        | null;
+      if (r.ok && json?.ok === true && json.matched === false) {
+        setEnrichCheck({
+          status: 'ok',
+          detail: 'endpoint reachable, auth ok (dummy match returned matched:false as expected)',
+        });
+      } else if (r.ok && json?.ok === true && json.matched === true) {
+        // Vanishingly unlikely with dummy number, but treat as alive.
+        setEnrichCheck({ status: 'ok', detail: 'endpoint reachable (matched a real row)' });
+      } else {
+        const why = json?.error ?? json?.reason ?? '(no body)';
+        setEnrichCheck({ status: 'fail', detail: `HTTP ${r.status} — ${why}`.slice(0, 160) });
+      }
+    } catch (e) {
+      setEnrichCheck({ status: 'fail', detail: e instanceof Error ? e.message : String(e) });
+    }
+  };
+
   const copyText = (text: string) => {
     if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
       navigator.clipboard.writeText(text).catch(() => undefined);
@@ -649,6 +689,70 @@ const ZadarmaSettings = () => {
             {checkBadge(eventCheck)}
           </div>
           {eventCheck.detail && <div style={{ fontSize: 11, color: 'var(--t-font-color-secondary)', marginLeft: 138 }}>{eventCheck.detail}</div>}
+        </div>
+      </div>
+
+      {/* ── 3a. AI enrichment webhook (vendor-agnostic post-call enrichment) */}
+      <div style={section}>
+        <div style={sectionTitle}>AI enrichment webhook</div>
+        <div style={sectionHelp}>
+          Endpoint that accepts post-call AI analysis from any vendor (Retell via n8n, Vapi, etc.)
+          and attaches it to the matching <code>callLog</code> row. Idempotent via{' '}
+          <code>correlationId</code>. Reachable from the public internet on any cloud Twenty install
+          — point your n8n / vendor adapter at the URL below. The Test button validates the
+          endpoint registration using this App's own token (no workspace key required for the
+          test).
+        </div>
+
+        <div style={row}>
+          <span style={labelCol}>URL</span>
+          <code style={codeBox}>{enrichmentWebhookUrl}</code>
+          <button type="button" style={button('ghost')} onClick={() => copyText(enrichmentWebhookUrl)}>Copy</button>
+          <button
+            type="button"
+            style={button('primary', enrichCheck.status === 'pending')}
+            onClick={() => testEnrichmentWebhook()}
+            disabled={enrichCheck.status === 'pending'}
+          >
+            Test
+          </button>
+          {checkBadge(enrichCheck)}
+        </div>
+        {enrichCheck.detail && (
+          <div style={{ fontSize: 11, color: 'var(--t-font-color-secondary)', marginLeft: 138 }}>
+            {enrichCheck.detail}
+          </div>
+        )}
+
+        <div style={row}>
+          <span style={labelCol}>Method</span>
+          <code style={{ fontFamily: 'monospace', fontSize: 12 }}>POST</code>
+        </div>
+
+        <div style={row}>
+          <span style={labelCol}>Auth</span>
+          <span style={{ fontSize: 12 }}>
+            <code style={{ fontFamily: 'monospace' }}>Bearer &lt;workspace API key&gt;</code> — create
+            one in <strong>Settings → Developers → API Keys</strong>. <strong>Do not</strong> use
+            this App's own token — it has narrower scope and is rotated on App reinstall.
+          </span>
+        </div>
+
+        <div style={row}>
+          <span style={labelCol}>Body</span>
+          <span style={{ fontSize: 12 }}>
+            <code style={{ fontFamily: 'monospace' }}>{'{ match, data }'}</code> — match resolves
+            the callLog (by <code>correlationId</code>, phone + timestamp, or recent fallback);
+            data carries vendor metrics (sentiment, success, transcript, etc.).
+          </span>
+        </div>
+
+        <div style={{ ...sectionHelp, marginTop: 8, marginBottom: 0 }}>
+          Full contract, field reference, Retell mapping table and paste-ready n8n snippets:{' '}
+          <a href={enrichmentDocsUrl} target="_blank" rel="noopener noreferrer" style={linkStyle}>
+            docs/AI_ENRICHMENT.md
+          </a>
+          .
         </div>
       </div>
 
