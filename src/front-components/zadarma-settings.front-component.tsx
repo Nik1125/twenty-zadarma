@@ -682,12 +682,10 @@ const ZadarmaSettings = () => {
           <a href="https://my.zadarma.com/marketplace/" target="_blank" rel="noopener noreferrer" style={linkStyle}>open</a>
           ): the "O połączeniach / Call notifications" URL field gets the PBX URL below; the
           "O zdarzeniach / Event notifications" URL field gets the Events URL.
-          The Test buttons below ping each endpoint with a <code>zd_echo</code> handshake from your browser — green means
-          the endpoint logic works. Click any URL to <strong>select it</strong>, then press <code>Ctrl/⌘+C</code> to
-          copy (Twenty's iframe sandbox blocks programmatic clipboard writes on some hosts).
-          <strong> Important:</strong> Zadarma's own "Test" button in their cabinet pings from the public internet, so
-          the URL must be publicly reachable. On localhost you need a tunnel (cloudflared / ngrok); on Coolify or any
-          cloud Twenty install it works directly.
+          The Test buttons below ping each endpoint with a <code>zd_echo</code> handshake from your browser — green
+          means the endpoint logic works. <strong>Important:</strong> Zadarma's own "Test" button in their cabinet
+          pings from the public internet, so the URL must be publicly reachable. On localhost you need a tunnel
+          (cloudflared / ngrok); on Coolify or any cloud Twenty install it works directly.
         </div>
 
         <div style={{ marginBottom: 12 }}>
@@ -695,7 +693,6 @@ const ZadarmaSettings = () => {
             <span style={labelCol}>PBX (calls)</span>
             <code
               style={codeBoxClickable}
-              title="Click to select, then Ctrl/⌘+C"
               onClick={(e) => handleCopy(pbxWebhookUrl, e.currentTarget as HTMLElement)}
             >
               {pbxWebhookUrl}
@@ -711,7 +708,6 @@ const ZadarmaSettings = () => {
             <span style={labelCol}>Events (SMS)</span>
             <code
               style={codeBoxClickable}
-              title="Click to select, then Ctrl/⌘+C"
               onClick={(e) => handleCopy(eventWebhookUrl, e.currentTarget as HTMLElement)}
             >
               {eventWebhookUrl}
@@ -730,8 +726,7 @@ const ZadarmaSettings = () => {
           Endpoint that accepts post-call AI analysis from any vendor (Retell via n8n, Vapi, etc.)
           and attaches it to the matching <code>callLog</code> row. Idempotent via{' '}
           <code>correlationId</code>. Reachable from the public internet on any cloud Twenty install
-          — point your n8n / vendor adapter at the URL below. Click any text block below to select
-          it, then press <code>Ctrl/⌘+C</code> to copy. The Test button validates registration
+          — point your n8n / vendor adapter at the URL below. The Test button validates registration
           using this App's own token (no workspace key required for the test).
         </div>
 
@@ -739,7 +734,6 @@ const ZadarmaSettings = () => {
           <span style={labelCol}>URL</span>
           <code
             style={codeBoxClickable}
-            title="Click to select, then Ctrl/⌘+C"
             onClick={(e) => handleCopy(enrichmentWebhookUrl, e.currentTarget as HTMLElement)}
           >
             {enrichmentWebhookUrl}
@@ -764,8 +758,7 @@ const ZadarmaSettings = () => {
           <span style={labelCol}>n8n quick start</span>
           <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 4 }}>
             <span style={{ fontSize: 11, color: 'var(--t-font-color-secondary)' }}>
-              Click the cURL below to select it, then press <code>Ctrl/⌘+C</code> to copy. Paste
-              into n8n HTTP Request node → ⋮ menu → <strong>Import cURL</strong>. Replace{' '}
+              Paste into n8n HTTP Request node → ⋮ menu → <strong>Import cURL</strong>. Replace{' '}
               <code style={{ fontFamily: 'monospace' }}>YOUR_WORKSPACE_API_KEY</code> and{' '}
               <code style={{ fontFamily: 'monospace' }}>&lt;placeholders&gt;</code> with n8n
               expressions.
@@ -781,7 +774,6 @@ const ZadarmaSettings = () => {
                 maxHeight: 220,
                 overflow: 'auto',
               }}
-              title="Click to select, then Ctrl/⌘+C"
               onClick={(e) =>
                 handleCopy(
                   buildEnrichmentCurl(enrichmentWebhookUrl),
