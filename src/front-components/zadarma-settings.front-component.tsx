@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
+import { useEffect, useMemo, useState, type CSSProperties } from 'react';
 import { defineFrontComponent } from 'twenty-sdk/define';
 
 import { APPLICATION_UNIVERSAL_IDENTIFIER } from 'src/constants/universal-identifiers';
@@ -72,13 +72,6 @@ const ZadarmaSettings = () => {
   const [pbxCheck, setPbxCheck] = useState<WebhookCheck>({ status: 'idle' });
   const [eventCheck, setEventCheck] = useState<WebhookCheck>({ status: 'idle' });
   const [enrichCheck, setEnrichCheck] = useState<WebhookCheck>({ status: 'idle' });
-
-  // Tracks which copyable element just succeeded — used to flash a "✓ copied"
-  // hint next to it. Single string keys (not booleans) keep multiple
-  // copy-targets independent so two flashes never overlap.
-  const [copiedKey, setCopiedKey] = useState<string | null>(null);
-  const [copyHint, setCopyHint] = useState<string>('');
-  const copyResetTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const [appId, setAppId] = useState<string | null>(null);
   const [defaultSenderDid, setDefaultSenderDid] = useState<string>('');
@@ -417,24 +410,12 @@ const ZadarmaSettings = () => {
     }
   };
 
-  // Selects the element's text and best-effort attempts a programmatic copy.
-  // We never claim "copied" because Twenty's iframe sandbox can silently
-  // no-op the underlying clipboard write — see copy-to-clipboard.ts. The
-  // hint always tells the user to press Ctrl/⌘+C; if the browser DID copy
-  // automatically, that keystroke is harmless (re-copies the same text).
-  const handleCopy = async (
-    key: string,
-    text: string,
-    target?: HTMLElement | null,
-  ) => {
-    await copyToClipboard(text, target);
-    if (copyResetTimer.current) clearTimeout(copyResetTimer.current);
-    setCopiedKey(key);
-    setCopyHint('selected — press Ctrl/⌘+C');
-    copyResetTimer.current = setTimeout(() => {
-      setCopiedKey(null);
-      setCopyHint('');
-    }, 4000);
+  // Selects the element's text and best-effort attempts a programmatic
+  // copy. Twenty's iframe sandbox can silently no-op the underlying
+  // clipboard write so we don't show a hint — the visible text selection
+  // is the cue, the user presses Ctrl/⌘+C themselves.
+  const handleCopy = (text: string, target?: HTMLElement | null) => {
+    void copyToClipboard(text, target);
   };
 
   // ── styles
@@ -481,11 +462,6 @@ const ZadarmaSettings = () => {
     if (c.status === 'ok') return <span style={badge('var(--t-color-green)')}>✓ ok</span>;
     return <span style={badge('var(--t-color-red)')}>✗ fail</span>;
   };
-
-  const renderCopyHint = (key: string) =>
-    copiedKey === key ? (
-      <span style={badge('var(--t-color-blue)')}>{copyHint}</span>
-    ) : null;
 
   const linkStyle: CSSProperties = { color: 'var(--t-color-blue)', textDecoration: 'underline' };
 
@@ -713,14 +689,13 @@ const ZadarmaSettings = () => {
             <span style={labelCol}>PBX (calls)</span>
             <code
               style={codeBoxClickable}
-              title="Click to copy"
-              onClick={(e) => handleCopy('pbx', pbxWebhookUrl, e.currentTarget as HTMLElement)}
+              title="Click to select, then Ctrl/⌘+C"
+              onClick={(e) => handleCopy(pbxWebhookUrl, e.currentTarget as HTMLElement)}
             >
               {pbxWebhookUrl}
             </code>
             <button type="button" style={button('primary')} onClick={() => testWebhook(pbxWebhookUrl, setPbxCheck)}>Test</button>
             {checkBadge(pbxCheck)}
-            {renderCopyHint('pbx')}
           </div>
           {pbxCheck.detail && <div style={{ fontSize: 11, color: 'var(--t-font-color-secondary)', marginLeft: 138 }}>{pbxCheck.detail}</div>}
         </div>
@@ -730,14 +705,13 @@ const ZadarmaSettings = () => {
             <span style={labelCol}>Events (SMS)</span>
             <code
               style={codeBoxClickable}
-              title="Click to copy"
-              onClick={(e) => handleCopy('events', eventWebhookUrl, e.currentTarget as HTMLElement)}
+              title="Click to select, then Ctrl/⌘+C"
+              onClick={(e) => handleCopy(eventWebhookUrl, e.currentTarget as HTMLElement)}
             >
               {eventWebhookUrl}
             </code>
             <button type="button" style={button('primary')} onClick={() => testWebhook(eventWebhookUrl, setEventCheck)}>Test</button>
             {checkBadge(eventCheck)}
-            {renderCopyHint('events')}
           </div>
           {eventCheck.detail && <div style={{ fontSize: 11, color: 'var(--t-font-color-secondary)', marginLeft: 138 }}>{eventCheck.detail}</div>}
         </div>
@@ -759,8 +733,8 @@ const ZadarmaSettings = () => {
           <span style={labelCol}>URL</span>
           <code
             style={codeBoxClickable}
-            title="Click to copy"
-            onClick={(e) => handleCopy('enrichment', enrichmentWebhookUrl, e.currentTarget as HTMLElement)}
+            title="Click to select, then Ctrl/⌘+C"
+            onClick={(e) => handleCopy(enrichmentWebhookUrl, e.currentTarget as HTMLElement)}
           >
             {enrichmentWebhookUrl}
           </code>
@@ -773,7 +747,6 @@ const ZadarmaSettings = () => {
             Test
           </button>
           {checkBadge(enrichCheck)}
-          {renderCopyHint('enrichment')}
         </div>
         {enrichCheck.detail && (
           <div style={{ fontSize: 11, color: 'var(--t-font-color-secondary)', marginLeft: 138 }}>
@@ -802,10 +775,9 @@ const ZadarmaSettings = () => {
                 maxHeight: 220,
                 overflow: 'auto',
               }}
-              title="Click to copy"
+              title="Click to select, then Ctrl/⌘+C"
               onClick={(e) =>
                 handleCopy(
-                  'curl',
                   buildEnrichmentCurl(enrichmentWebhookUrl),
                   e.currentTarget as HTMLElement,
                 )
@@ -813,7 +785,6 @@ const ZadarmaSettings = () => {
             >
               {buildEnrichmentCurl(enrichmentWebhookUrl)}
             </pre>
-            {renderCopyHint('curl')}
           </div>
         </div>
 
