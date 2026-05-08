@@ -4,6 +4,10 @@ import { CoreApiClient } from 'twenty-client-sdk/core';
 
 import { signZadarmaRequest } from 'src/modules/zadarma/connector/sign-request';
 import { findPersonIdByClientNumber } from 'src/modules/zadarma/utils/find-person-by-phone';
+import {
+  formatOptOutMessage,
+  isOptedOutOfSms,
+} from 'src/modules/zadarma/utils/is-opted-out-of-sms';
 import { normalizePhone } from 'src/modules/zadarma/utils/normalize-phone';
 import { updateLastContactedIfNewer } from 'src/modules/zadarma/utils/update-last-contacted';
 
@@ -86,6 +90,49 @@ const innerHandler = async (
     };
   }
 
+  // Resolve target Person up-front so we can short-circuit on opt-out before
+  // contacting Zadarma. Caller may pass personId explicitly (UI knows the
+  // context); otherwise look up by phone.
+  const client = new CoreApiClient();
+  let personId: string | null = body.personId ?? null;
+  if (!personId) {
+    personId = await findPersonIdByClientNumber(client, number);
+  }
+
+  // Defense-in-depth opt-out guard. The chat panel disables Send when
+  // doNotSms is true, but anyone hitting this endpoint directly (n8n, curl,
+  // future template-sender) must hit the same check server-side. Refusing
+  // here means: no Zadarma API call, no smsLog row, no charge incurred.
+  if (personId) {
+    const personOptOut = (await client.query({
+      person: {
+        __args: { filter: { id: { eq: personId } } },
+        doNotSms: true,
+        doNotSmsAt: true,
+        doNotSmsReason: true,
+      },
+    })) as {
+      person: {
+        doNotSms: boolean | null;
+        doNotSmsAt: string | null;
+        doNotSmsReason: string | null;
+      } | null;
+    };
+    if (isOptedOutOfSms(personOptOut.person)) {
+      debug.push('[opt-out] doNotSms=true, refusing to send');
+      console.log(
+        `[send-zadarma-sms] OPT_OUT number=${number} personId=${personId}`,
+      );
+      return {
+        ok: false,
+        error: 'OPT_OUT',
+        message: formatOptOutMessage(personOptOut.person),
+        personId,
+        debug,
+      };
+    }
+  }
+
   const userKey = process.env.ZADARMA_USER_KEY;
   const secret = process.env.ZADARMA_SECRET;
   debug.push(`[creds] userKey=${userKey ? 'set' : 'missing'} secret=${secret ? 'set' : 'missing'}`);
@@ -119,15 +166,6 @@ const innerHandler = async (
     data = JSON.parse(responseText) as ZadarmaSmsSendResponse;
   } catch {
     return { ok: false, error: 'zadarma returned non-JSON', responseText, debug };
-  }
-
-  const client = new CoreApiClient();
-
-  // Resolve personId — caller may pass it explicitly (UI knows the context),
-  // otherwise look up by phone.
-  let personId: string | null = body.personId ?? null;
-  if (!personId) {
-    personId = await findPersonIdByClientNumber(client, number);
   }
 
   // Zadarma's send-sms response doesn't carry a unique message ID — we mint
