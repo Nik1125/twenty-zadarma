@@ -1,7 +1,9 @@
-import { useEffect, useMemo, useState, type CSSProperties } from 'react';
+import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { defineFrontComponent } from 'twenty-sdk/define';
 
 import { APPLICATION_UNIVERSAL_IDENTIFIER } from 'src/constants/universal-identifiers';
+import { buildEnrichmentCurl } from 'src/front-components/utils/build-enrichment-curl';
+import { copyToClipboard } from 'src/front-components/utils/copy-to-clipboard';
 
 export const ZADARMA_SETTINGS_FRONT_COMPONENT_UNIVERSAL_IDENTIFIER =
   '71c274e8-f9af-4835-9442-6a9a1a17a87b';
@@ -70,6 +72,13 @@ const ZadarmaSettings = () => {
   const [pbxCheck, setPbxCheck] = useState<WebhookCheck>({ status: 'idle' });
   const [eventCheck, setEventCheck] = useState<WebhookCheck>({ status: 'idle' });
   const [enrichCheck, setEnrichCheck] = useState<WebhookCheck>({ status: 'idle' });
+
+  // Tracks which copyable element just succeeded — used to flash a "✓ copied"
+  // hint next to it. Single string keys (not booleans) keep multiple
+  // copy-targets independent so two flashes never overlap.
+  const [copiedKey, setCopiedKey] = useState<string | null>(null);
+  const [copyHint, setCopyHint] = useState<string>('');
+  const copyResetTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const [appId, setAppId] = useState<string | null>(null);
   const [defaultSenderDid, setDefaultSenderDid] = useState<string>('');
@@ -408,18 +417,37 @@ const ZadarmaSettings = () => {
     }
   };
 
-  const copyText = (text: string) => {
-    if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
-      navigator.clipboard.writeText(text).catch(() => undefined);
-    }
+  // Copies `text` and flashes a "✓ copied" hint near the element identified by
+  // `key`. Uses the multi-strategy helper that survives iframe sandboxing.
+  const handleCopy = async (
+    key: string,
+    text: string,
+    target?: HTMLElement | null,
+  ) => {
+    const outcome = await copyToClipboard(text, target);
+    if (copyResetTimer.current) clearTimeout(copyResetTimer.current);
+    setCopiedKey(key);
+    setCopyHint(
+      outcome === 'selected-only' || outcome === 'failed'
+        ? 'press Ctrl/⌘+C'
+        : 'copied',
+    );
+    copyResetTimer.current = setTimeout(() => {
+      setCopiedKey(null);
+      setCopyHint('');
+    }, 1500);
   };
 
   // ── styles
+  // All colours pulled from Twenty's CSS theme tokens (see
+  // packages/twenty-ui/src/theme-constants/themeCssVariables.ts) so light/dark
+  // theme switches in the Twenty UI propagate automatically.
   const container: CSSProperties = {
     padding: 24, display: 'flex', flexDirection: 'column', gap: 24, fontFamily: 'inherit',
   };
   const section: CSSProperties = {
-    background: 'var(--t-background-primary)', borderRadius: 8, border: '1px solid rgba(0,0,0,0.08)', padding: 16,
+    background: 'var(--t-background-primary)', borderRadius: 8,
+    border: '1px solid var(--t-border-color-light)', padding: 16,
   };
   const sectionTitle: CSSProperties = { fontSize: 14, fontWeight: 600, marginBottom: 12, color: 'var(--t-font-color-primary)' };
   const sectionHelp: CSSProperties = { fontSize: 12, color: 'var(--t-font-color-secondary)', marginBottom: 12, lineHeight: 1.5 };
@@ -429,28 +457,38 @@ const ZadarmaSettings = () => {
     flex: 1, fontFamily: 'monospace', fontSize: 12, background: 'var(--t-background-secondary)',
     padding: '4px 8px', borderRadius: 4, border: '1px solid var(--t-border-color-light)', wordBreak: 'break-all',
   };
+  const codeBoxClickable: CSSProperties = {
+    ...codeBox, cursor: 'pointer', userSelect: 'all',
+  };
   const button = (variant: 'primary' | 'ghost' = 'ghost', disabled = false): CSSProperties => ({
     padding: '4px 10px', fontSize: 12,
-    border: variant === 'primary' ? 'none' : '1px solid rgba(0,0,0,0.15)',
-    background: disabled ? '#cbd5e1' : (variant === 'primary' ? '#3b82f6' : 'white'),
-    color: variant === 'primary' ? 'white' : '#111',
+    border: variant === 'primary' ? 'none' : '1px solid var(--t-border-color-medium)',
+    background: disabled
+      ? 'var(--t-background-tertiary)'
+      : variant === 'primary'
+        ? 'var(--t-color-blue)'
+        : 'var(--t-background-primary)',
+    color: variant === 'primary' ? 'var(--t-font-color-inverted)' : 'var(--t-font-color-primary)',
     borderRadius: 4, cursor: disabled ? 'not-allowed' : 'pointer', fontWeight: 500,
   });
   const badge = (color: string): CSSProperties => ({
     padding: '2px 8px', fontSize: 11, fontWeight: 500, borderRadius: 10,
-    background: color, color: 'white', display: 'inline-block',
+    background: color, color: 'var(--t-font-color-inverted)', display: 'inline-block',
   });
 
   const checkBadge = (c: WebhookCheck) => {
     if (c.status === 'idle') return null;
-    if (c.status === 'pending') return <span style={badge('#94a3b8')}>checking…</span>;
-    if (c.status === 'ok') return <span style={badge('#16a34a')}>✓ ok</span>;
-    return <span style={badge('#dc2626')}>✗ fail</span>;
+    if (c.status === 'pending') return <span style={badge('var(--t-color-gray)')}>checking…</span>;
+    if (c.status === 'ok') return <span style={badge('var(--t-color-green)')}>✓ ok</span>;
+    return <span style={badge('var(--t-color-red)')}>✗ fail</span>;
   };
 
-  const linkStyle: CSSProperties = { color: '#3b82f6', textDecoration: 'underline' };
-  // Note: blue link colour stays hard-coded — readable on both light and dark
-  // Twenty themes (#3b82f6 has solid contrast against both backgrounds).
+  const renderCopyHint = (key: string) =>
+    copiedKey === key ? (
+      <span style={badge('var(--t-color-green)')}>✓ {copyHint}</span>
+    ) : null;
+
+  const linkStyle: CSSProperties = { color: 'var(--t-color-blue)', textDecoration: 'underline' };
 
   const tzMissing = appId !== null && cabinetTimezone.trim() === '';
 
@@ -482,7 +520,7 @@ const ZadarmaSettings = () => {
               <span style={labelCol}>Balance</span>
               <strong>{info.balance?.toFixed(2)} {info.currency}</strong>
               {info.balance !== undefined && info.balance < 1 && (
-                <span style={{ ...badge('#ea580c'), marginLeft: 8 }}>low balance</span>
+                <span style={{ ...badge('var(--t-color-orange)'), marginLeft: 8 }}>low balance</span>
               )}
             </div>
             {info.tariff && (
@@ -642,8 +680,8 @@ const ZadarmaSettings = () => {
               </button>
             </>
           )}
-          {tzCustomMode && tzValid === true && <span style={badge('#16a34a')}>✓ valid</span>}
-          {tzCustomMode && tzValid === false && <span style={badge('#dc2626')}>✗ invalid IANA</span>}
+          {tzCustomMode && tzValid === true && <span style={badge('var(--t-color-green)')}>✓ valid</span>}
+          {tzCustomMode && tzValid === false && <span style={badge('var(--t-color-red)')}>✗ invalid IANA</span>}
           {savingVar === 'ZADARMA_CABINET_TIMEZONE' && <span style={{ fontSize: 11, color: 'var(--t-font-color-secondary)' }}>saving…</span>}
         </div>
         <div style={{ ...sectionHelp, marginTop: 4, marginBottom: 0, marginLeft: 138 }}>
@@ -664,18 +702,24 @@ const ZadarmaSettings = () => {
           ): the "O połączeniach / Call notifications" URL field gets the PBX URL below; the
           "O zdarzeniach / Event notifications" URL field gets the Events URL.
           The Test buttons below ping each endpoint with a <code>zd_echo</code> handshake from your browser — green means
-          the endpoint logic works. <strong>Important:</strong> Zadarma's own "Test" button in their cabinet pings from
-          the public internet, so the URL must be publicly reachable. On localhost you need a tunnel
-          (cloudflared / ngrok); on Coolify or any cloud Twenty install it works directly.
+          the endpoint logic works. Click any URL to copy. <strong>Important:</strong> Zadarma's own "Test" button
+          in their cabinet pings from the public internet, so the URL must be publicly reachable. On localhost you
+          need a tunnel (cloudflared / ngrok); on Coolify or any cloud Twenty install it works directly.
         </div>
 
         <div style={{ marginBottom: 12 }}>
           <div style={row}>
             <span style={labelCol}>PBX (calls)</span>
-            <code style={codeBox}>{pbxWebhookUrl}</code>
-            <button type="button" style={button('ghost')} onClick={() => copyText(pbxWebhookUrl)}>Copy</button>
+            <code
+              style={codeBoxClickable}
+              title="Click to copy"
+              onClick={(e) => handleCopy('pbx', pbxWebhookUrl, e.currentTarget as HTMLElement)}
+            >
+              {pbxWebhookUrl}
+            </code>
             <button type="button" style={button('primary')} onClick={() => testWebhook(pbxWebhookUrl, setPbxCheck)}>Test</button>
             {checkBadge(pbxCheck)}
+            {renderCopyHint('pbx')}
           </div>
           {pbxCheck.detail && <div style={{ fontSize: 11, color: 'var(--t-font-color-secondary)', marginLeft: 138 }}>{pbxCheck.detail}</div>}
         </div>
@@ -683,10 +727,16 @@ const ZadarmaSettings = () => {
         <div>
           <div style={row}>
             <span style={labelCol}>Events (SMS)</span>
-            <code style={codeBox}>{eventWebhookUrl}</code>
-            <button type="button" style={button('ghost')} onClick={() => copyText(eventWebhookUrl)}>Copy</button>
+            <code
+              style={codeBoxClickable}
+              title="Click to copy"
+              onClick={(e) => handleCopy('events', eventWebhookUrl, e.currentTarget as HTMLElement)}
+            >
+              {eventWebhookUrl}
+            </code>
             <button type="button" style={button('primary')} onClick={() => testWebhook(eventWebhookUrl, setEventCheck)}>Test</button>
             {checkBadge(eventCheck)}
+            {renderCopyHint('events')}
           </div>
           {eventCheck.detail && <div style={{ fontSize: 11, color: 'var(--t-font-color-secondary)', marginLeft: 138 }}>{eventCheck.detail}</div>}
         </div>
@@ -699,15 +749,21 @@ const ZadarmaSettings = () => {
           Endpoint that accepts post-call AI analysis from any vendor (Retell via n8n, Vapi, etc.)
           and attaches it to the matching <code>callLog</code> row. Idempotent via{' '}
           <code>correlationId</code>. Reachable from the public internet on any cloud Twenty install
-          — point your n8n / vendor adapter at the URL below. The Test button validates the
-          endpoint registration using this App's own token (no workspace key required for the
-          test).
+          — point your n8n / vendor adapter at the URL below. Click the URL to copy. The Test
+          button validates registration using this App's own token (no workspace key required for
+          the test). The <strong>Copy n8n cURL</strong> button puts a paste-ready cURL on your
+          clipboard — drop it into n8n's HTTP Request node via "Import cURL" to scaffold the call.
         </div>
 
         <div style={row}>
           <span style={labelCol}>URL</span>
-          <code style={codeBox}>{enrichmentWebhookUrl}</code>
-          <button type="button" style={button('ghost')} onClick={() => copyText(enrichmentWebhookUrl)}>Copy</button>
+          <code
+            style={codeBoxClickable}
+            title="Click to copy"
+            onClick={(e) => handleCopy('enrichment', enrichmentWebhookUrl, e.currentTarget as HTMLElement)}
+          >
+            {enrichmentWebhookUrl}
+          </code>
           <button
             type="button"
             style={button('primary', enrichCheck.status === 'pending')}
@@ -717,12 +773,31 @@ const ZadarmaSettings = () => {
             Test
           </button>
           {checkBadge(enrichCheck)}
+          {renderCopyHint('enrichment')}
         </div>
         {enrichCheck.detail && (
           <div style={{ fontSize: 11, color: 'var(--t-font-color-secondary)', marginLeft: 138 }}>
             {enrichCheck.detail}
           </div>
         )}
+
+        <div style={{ ...row, marginTop: 4 }}>
+          <span style={labelCol}>n8n quick start</span>
+          <button
+            type="button"
+            style={button('ghost')}
+            onClick={() => handleCopy('curl', buildEnrichmentCurl(enrichmentWebhookUrl))}
+          >
+            Copy n8n cURL
+          </button>
+          {renderCopyHint('curl')}
+          <span style={{ fontSize: 11, color: 'var(--t-font-color-secondary)' }}>
+            Paste into HTTP Request node → ⋮ menu → "Import cURL". Replace{' '}
+            <code style={{ fontFamily: 'monospace' }}>YOUR_WORKSPACE_API_KEY</code> and{' '}
+            <code style={{ fontFamily: 'monospace' }}>&lt;placeholders&gt;</code> with n8n
+            expressions.
+          </span>
+        </div>
 
         <div style={row}>
           <span style={labelCol}>Method</span>

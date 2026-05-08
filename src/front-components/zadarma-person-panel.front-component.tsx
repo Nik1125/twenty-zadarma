@@ -60,14 +60,16 @@ const formatDuration = (sec: number | null): string => {
   return m > 0 ? `${m}m ${s}s` : `${s}s`;
 };
 
+// Returns a Twenty CSS theme token so call-disposition badges follow the
+// active light/dark theme automatically.
 const dispositionColor = (d: string | null): string => {
   switch (d) {
-    case 'ANSWERED': return '#16a34a';
-    case 'NO_ANSWER': return '#ea580c';
-    case 'BUSY': return '#ca8a04';
-    case 'CANCEL': return '#6b7280';
-    case 'CALL_FAILED': return '#dc2626';
-    default: return '#6b7280';
+    case 'ANSWERED': return 'var(--t-color-green)';
+    case 'NO_ANSWER': return 'var(--t-color-orange)';
+    case 'BUSY': return 'var(--t-color-amber)';
+    case 'CANCEL': return 'var(--t-color-gray)';
+    case 'CALL_FAILED': return 'var(--t-color-red)';
+    default: return 'var(--t-color-gray)';
   }
 };
 
@@ -259,8 +261,8 @@ const ZadarmaPersonPanel = () => {
     alignSelf: direction === 'OUT' ? 'flex-end' : 'flex-start',
     maxWidth: '80%',
     padding: '8px 12px',
-    background: direction === 'OUT' ? '#3b82f6' : 'var(--t-background-primary)',
-    color: direction === 'OUT' ? '#ffffff' : 'var(--t-font-color-primary)',
+    background: direction === 'OUT' ? 'var(--t-color-blue)' : 'var(--t-background-primary)',
+    color: direction === 'OUT' ? 'var(--t-font-color-inverted)' : 'var(--t-font-color-primary)',
     border: direction === 'OUT' ? 'none' : '1px solid var(--t-border-color-light)',
     borderRadius: 12,
     fontSize: 13,
@@ -400,8 +402,8 @@ const ZadarmaPersonPanel = () => {
             }}
             style={{
               padding: '8px 16px', border: 'none',
-              background: sending || !messageText.trim() ? 'var(--t-background-tertiary)' : '#3b82f6',
-              color: '#ffffff', borderRadius: 6,
+              background: sending || !messageText.trim() ? 'var(--t-background-tertiary)' : 'var(--t-color-blue)',
+              color: 'var(--t-font-color-inverted)', borderRadius: 6,
               cursor: sending || !messageText.trim() ? 'not-allowed' : 'pointer',
               fontSize: 13, fontWeight: 500,
             }}
