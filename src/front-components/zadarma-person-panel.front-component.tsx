@@ -3,7 +3,25 @@ import {
   defineFrontComponent,
   STANDARD_OBJECT_UNIVERSAL_IDENTIFIERS,
 } from 'twenty-sdk/define';
-import { useRecordId } from 'twenty-sdk/front-component';
+import { useFrontComponentExecutionContext } from 'twenty-sdk/front-component';
+
+// SDK 2.3.0 ships useRecordId() that blindly reads ctx.selectedRecordIds.length,
+// but Twenty server <=2.2.x sends contexts that contain only the deprecated
+// ctx.recordId field — no selectedRecordIds array. The result is an
+// unhandled TypeError on every panel mount against older servers. This
+// shim accepts either shape (preferring the newer array when present)
+// and returns the same string | null contract as useRecordId.
+const useRecordIdCompat = (): string | null =>
+  useFrontComponentExecutionContext((ctx) => {
+    const ctxAsRecord = ctx as unknown as {
+      selectedRecordIds?: string[] | null;
+      recordId?: string | null;
+    };
+    const ids = ctxAsRecord.selectedRecordIds;
+    if (Array.isArray(ids) && ids.length === 1) return ids[0] ?? null;
+    if (Array.isArray(ids) && ids.length > 1) return null;
+    return ctxAsRecord.recordId ?? null;
+  });
 import { CoreApiClient } from 'twenty-client-sdk/core';
 
 import { APPLICATION_UNIVERSAL_IDENTIFIER } from 'src/constants/universal-identifiers';
@@ -37,6 +55,9 @@ type PersonNode = {
     primaryPhoneNumber: string | null;
     primaryPhoneCallingCode: string | null;
   } | null;
+  doNotSms: boolean | null;
+  doNotSmsAt: string | null;
+  doNotSmsReason: string | null;
 };
 
 type Tab = 'calls' | 'sms';
@@ -74,7 +95,7 @@ const dispositionColor = (d: string | null): string => {
 };
 
 const ZadarmaPersonPanel = () => {
-  const personId = useRecordId();
+  const personId = useRecordIdCompat();
   const [tab, setTab] = useState<Tab>('sms');
   const [callLogs, setCallLogs] = useState<CallLogNode[]>([]);
   const [smsLogs, setSmsLogs] = useState<SmsLogNode[]>([]);
@@ -143,6 +164,8 @@ const ZadarmaPersonPanel = () => {
     return all[0]?.ourNumber ?? defaultSenderDid;
   }, [smsLogs, callLogs, defaultSenderDid]);
 
+  const isOptOut = person?.doNotSms === true;
+
   const fetchData = async () => {
     if (personId === null) {
       setLoading(false);
@@ -156,6 +179,9 @@ const ZadarmaPersonPanel = () => {
           __args: { filter: { id: { eq: personId } } },
           id: true,
           phones: { primaryPhoneNumber: true, primaryPhoneCallingCode: true },
+          doNotSms: true,
+          doNotSmsAt: true,
+          doNotSmsReason: true,
         },
       }) as unknown as Promise<{ person: PersonNode | null }>,
       client.query({
@@ -334,9 +360,35 @@ const ZadarmaPersonPanel = () => {
       </div>
       {submitUrl && clientNumber ? (
         <div style={{
-          display: 'flex', gap: 8, padding: 12, background: 'var(--t-background-primary)',
-          borderTop: '1px solid var(--t-border-color-light)', alignItems: 'flex-end',
+          display: 'flex', flexDirection: 'column',
+          background: 'var(--t-background-primary)',
+          borderTop: '1px solid var(--t-border-color-light)',
         }}>
+          {isOptOut && person ? (
+            <div style={{
+              padding: '10px 12px',
+              background: 'var(--t-background-transparent-orange)',
+              fontSize: 12,
+              color: 'var(--t-font-color-primary)',
+              borderBottom: '1px solid var(--t-border-color-light)',
+              lineHeight: 1.4,
+            }}>
+              <span style={{ fontWeight: 600 }}>SMS sending blocked. </span>
+              <span>
+                Contact opted out of SMS
+                {person.doNotSmsAt ? ' on ' + formatDateTime(person.doNotSmsAt) : ''}
+                .
+              </span>
+              {person.doNotSmsReason ? (
+                <div style={{ marginTop: 4, color: 'var(--t-font-color-secondary)', fontStyle: 'italic' }}>
+                  Reason: {person.doNotSmsReason}
+                </div>
+              ) : null}
+            </div>
+          ) : null}
+          <div style={{
+            display: 'flex', gap: 8, padding: 12, alignItems: 'flex-end',
+          }}>
           {/* Controlled textarea. Worker reads typed text via `e.detail.value`
               (custom-element CustomEvent dispatched by remote-dom — see
               feedback_twenty_app_sdk_2_2_quirks memory).
@@ -345,7 +397,7 @@ const ZadarmaPersonPanel = () => {
               so the heuristic counts hard newlines only — wrapped long lines
               just expand the scrollbar inside the same row. */}
           <textarea
-            placeholder="Type a message…"
+            placeholder={isOptOut ? 'Sending disabled — contact opted out' : 'Type a message…'}
             value={messageText}
             rows={Math.min(4, Math.max(1, messageText.split('\n').length))}
             onChange={(e: { detail?: { value?: string } }) => {
@@ -354,7 +406,7 @@ const ZadarmaPersonPanel = () => {
             onInput={(e: { detail?: { value?: string } }) => {
               setMessageText(e.detail?.value ?? '');
             }}
-            disabled={sending}
+            disabled={sending || isOptOut}
             style={{
               flex: 1, padding: '8px 12px',
               border: '1px solid var(--t-border-color-medium)',
@@ -362,12 +414,12 @@ const ZadarmaPersonPanel = () => {
               background: 'var(--t-background-primary)',
               color: 'var(--t-font-color-primary)',
               lineHeight: 1.4, resize: 'none',
-              opacity: sending ? 0.6 : 1,
+              opacity: sending || isOptOut ? 0.6 : 1,
             }}
           />
           <button
             type="button"
-            disabled={sending || !messageText.trim()}
+            disabled={sending || isOptOut || !messageText.trim()}
             onClick={async () => {
               setSendError(null);
               setSending(true);
@@ -406,14 +458,15 @@ const ZadarmaPersonPanel = () => {
             }}
             style={{
               padding: '8px 16px', border: 'none',
-              background: sending || !messageText.trim() ? 'var(--t-background-tertiary)' : 'var(--t-color-blue)',
+              background: sending || isOptOut || !messageText.trim() ? 'var(--t-background-tertiary)' : 'var(--t-color-blue)',
               color: 'var(--t-font-color-inverted)', borderRadius: 6,
-              cursor: sending || !messageText.trim() ? 'not-allowed' : 'pointer',
+              cursor: sending || isOptOut || !messageText.trim() ? 'not-allowed' : 'pointer',
               fontSize: 13, fontWeight: 500,
             }}
           >
             {sending ? '…' : 'Send'}
           </button>
+          </div>
         </div>
       ) : (
         <div style={{
