@@ -49,6 +49,16 @@ export const CALL_LOG_CALLER_TYPE_FIELD_UNIVERSAL_IDENTIFIER =
   'e97926fb-321f-456d-8350-cca6ae9e6530';
 export const CALL_LOG_CALL_ID_FIELD_UNIVERSAL_IDENTIFIER =
   '2b1a7c93-4e58-4fb2-9de7-3a8c5f1d2e64';
+export const CALL_LOG_AI_TRANSCRIPT_FIELD_UNIVERSAL_IDENTIFIER =
+  'fa3776d8-5b3e-4fba-b1cd-b5c487bc9a13';
+export const CALL_LOG_AI_INTEREST_LEVEL_FIELD_UNIVERSAL_IDENTIFIER =
+  '1694a529-3374-466f-a9b0-5e195d363928';
+export const CALL_LOG_AI_ACTION_REQUIRED_FIELD_UNIVERSAL_IDENTIFIER =
+  '29e654d2-9ccb-4df0-bc63-d8e6e71df869';
+export const CALL_LOG_AI_ACTION_CONTEXT_FIELD_UNIVERSAL_IDENTIFIER =
+  'c29dc16d-195d-4d9c-bad7-71d964e6a1fd';
+export const CALL_LOG_AI_KEY_TOPICS_FIELD_UNIVERSAL_IDENTIFIER =
+  'eaed9baa-9036-40ae-888a-fc1c0d74cf2c';
 
 export default defineObject({
   universalIdentifier: CALL_LOG_OBJECT_UNIVERSAL_IDENTIFIER,
@@ -213,18 +223,121 @@ export default defineObject({
       universalIdentifier: CALL_LOG_TRANSCRIPT_FIELD_UNIVERSAL_IDENTIFIER,
       type: FieldType.RICH_TEXT,
       name: 'transcript',
-      label: 'Transcript',
-      description: 'Full dialog transcript (filled by external automation, e.g. AssemblyAI via N8N)',
+      label: 'Manager transcript',
+      description:
+        'Dialog transcript from Zadarma speech recognition for manager-handled calls. Set by the SPEECH_RECOGNITION webhook and the recording/transcript backfill. Mutually exclusive with AI transcript — only one is populated per call.',
       icon: 'IconMessage',
+      isNullable: true,
+    },
+    {
+      universalIdentifier: CALL_LOG_AI_TRANSCRIPT_FIELD_UNIVERSAL_IDENTIFIER,
+      type: FieldType.RICH_TEXT,
+      name: 'aiTranscript',
+      label: 'AI transcript',
+      description:
+        'Dialog transcript from the AI vendor (e.g. Retell). Set by external automation via /zadarma/call-enrichment. Mutually exclusive with the manager transcript field.',
+      icon: 'IconRobot',
       isNullable: true,
     },
     {
       universalIdentifier: CALL_LOG_SUMMARY_FIELD_UNIVERSAL_IDENTIFIER,
       type: FieldType.RICH_TEXT,
       name: 'summary',
-      label: 'Summary',
-      description: 'Short AI-generated summary of the conversation',
+      label: 'AI summary',
+      description:
+        'Short LLM-generated summary of the conversation. Set by external automation via /zadarma/call-enrichment regardless of whether the call was handled by a manager or an AI vendor.',
       icon: 'IconNotes',
+      isNullable: true,
+    },
+    {
+      universalIdentifier: CALL_LOG_AI_INTEREST_LEVEL_FIELD_UNIVERSAL_IDENTIFIER,
+      type: FieldType.NUMBER,
+      name: 'aiInterestLevel',
+      label: 'AI interest level',
+      description:
+        'Lead interest level on a 1-5 scale, classified by the post-call analyser. Use for warm-lead ranking in dashboards.',
+      icon: 'IconFlame',
+      isNullable: true,
+    },
+    {
+      universalIdentifier: CALL_LOG_AI_ACTION_REQUIRED_FIELD_UNIVERSAL_IDENTIFIER,
+      type: FieldType.SELECT,
+      name: 'aiActionRequired',
+      label: 'AI action required',
+      description:
+        'Follow-up the post-call analyser recommends. Drives downstream workflows (SMS auto-send, operator-task creation, escalation, opt-out).',
+      icon: 'IconBolt',
+      isNullable: true,
+      options: [
+        {
+          id: 'b9e7f482-1d56-4a3c-9e21-7f0d8c5b3a14',
+          value: 'NONE',
+          label: 'None',
+          position: 0,
+          color: 'gray',
+        },
+        {
+          id: '4f2a8c75-3b91-4d68-a527-1e6d9b3c8f02',
+          value: 'SMS_FOLLOWUP',
+          label: 'SMS follow-up',
+          position: 1,
+          color: 'blue',
+        },
+        {
+          id: '7c3e1d49-8a52-4b76-9f04-2d8c5e7b1a93',
+          value: 'EMAIL_OFFER',
+          label: 'Email offer',
+          position: 2,
+          color: 'purple',
+        },
+        {
+          id: 'a18d5f37-9c64-4e82-b035-4f7e2d6c8b51',
+          value: 'CALLBACK',
+          label: 'Callback',
+          position: 3,
+          color: 'orange',
+        },
+        {
+          id: 'e2b6c984-5a73-4f15-8d29-6c4e8f1a7b30',
+          value: 'OPERATOR_TASK',
+          label: 'Operator task',
+          position: 4,
+          color: 'yellow',
+        },
+        {
+          id: '5d9a4f12-7c63-4e87-a052-3f6d8b1c5e94',
+          value: 'HUMAN_TRANSFER',
+          label: 'Human transfer',
+          position: 5,
+          color: 'pink',
+        },
+        {
+          id: 'c8f3e145-4b29-4d76-a912-7e6c8d3f5a02',
+          value: 'DO_NOT_CONTACT',
+          label: 'Do not contact',
+          position: 6,
+          color: 'red',
+        },
+      ],
+    },
+    {
+      universalIdentifier: CALL_LOG_AI_ACTION_CONTEXT_FIELD_UNIVERSAL_IDENTIFIER,
+      type: FieldType.TEXT,
+      name: 'aiActionContext',
+      label: 'AI action context',
+      description:
+        'Free-form natural-language context for the recommended action (~1-3 sentences from the analyser). Read by the operator or by downstream workflows that need extra signal beyond the action enum.',
+      icon: 'IconQuote',
+      isNullable: true,
+    },
+    {
+      universalIdentifier: CALL_LOG_AI_KEY_TOPICS_FIELD_UNIVERSAL_IDENTIFIER,
+      type: FieldType.RAW_JSON,
+      name: 'aiKeyTopics',
+      label: 'AI key topics',
+      description:
+        'Array of topical tags extracted from the conversation. Free-form strings; convention is `topic` for plain topics and `objection:<reason>` for objections (e.g. ["algeness", "training_warsaw", "objection:price"]). Use for search and grouping.',
+      icon: 'IconHash',
       isNullable: true,
     },
     {
@@ -340,7 +453,7 @@ export default defineObject({
       name: 'correlationId',
       label: 'Correlation ID',
       description:
-        'Vendor-side call identifier (e.g. Retell call_id). Used as the idempotent join key for re-runs of /zadarma/call-enrichment. Vendor-raw debug data (tool calls, latency, transcripts) lives in a Note linked to this callLog via noteTargets, not on the callLog itself.',
+        'Vendor-side call identifier (e.g. Retell call_id). Used as the idempotent join key for re-runs of /zadarma/call-enrichment.',
       icon: 'IconLink',
       isNullable: true,
     },

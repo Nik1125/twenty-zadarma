@@ -13,10 +13,12 @@ import { resolveCallLogMatch } from 'src/modules/zadarma/utils/resolve-call-log-
 // post-call analysis adapter (Retell via n8n, Vapi, etc.), resolves the
 // matching callLog row, and updates structured AI metric fields on it.
 //
-// Vendor-raw debug (tool calls, latency stats, full transcript breakdown,
-// recording URLs) is expected to live in a Note attached to the callLog
-// via Twenty's `noteTargets` mechanism — created by the adapter on its own
-// after this endpoint returns the callLogId.
+// Schema as of v0.19.0: transcripts and summaries land directly on the
+// callLog rich-text fields (`aiTranscript`, `summary` (label "AI summary"))
+// and structured analysis lands on typed fields (`aiInterestLevel`,
+// `aiActionRequired`, `aiActionContext`, `aiKeyTopics`). The earlier
+// "vendor data goes to a linked Note" pattern has been retired — debug
+// dumps that don't fit the schema should not be persisted.
 //
 // Idempotent: re-running with the same `match.correlationId` updates the
 // same row (no 409 — adapter retries are safe).
@@ -27,6 +29,15 @@ import { resolveCallLogMatch } from 'src/modules/zadarma/utils/resolve-call-log-
 //   400 invalid body shape
 
 type Sentiment = 'POSITIVE' | 'NEGATIVE' | 'NEUTRAL' | 'UNKNOWN';
+
+type AiActionRequired =
+  | 'NONE'
+  | 'SMS_FOLLOWUP'
+  | 'EMAIL_OFFER'
+  | 'CALLBACK'
+  | 'OPERATOR_TASK'
+  | 'HUMAN_TRANSFER'
+  | 'DO_NOT_CONTACT';
 
 type EnrichmentBody = {
   match?: {
@@ -46,9 +57,13 @@ type EnrichmentBody = {
     aiTransferred?: boolean;
     aiCost?: { amountMicros?: number; currencyCode?: string };
     correlationId?: string;
-    transcript?: string;
-    summary?: string;
+    aiTranscript?: string;
+    aiSummary?: string;
     recordingUrl?: string;
+    aiInterestLevel?: number;
+    aiActionRequired?: string; // case-insensitive, normalised below
+    aiActionContext?: string;
+    aiKeyTopics?: unknown; // expected string[] — normalised below
   };
 };
 
@@ -59,10 +74,45 @@ const SENTIMENT_VALUES: ReadonlySet<Sentiment> = new Set([
   'UNKNOWN',
 ]);
 
+const AI_ACTION_VALUES: ReadonlySet<AiActionRequired> = new Set([
+  'NONE',
+  'SMS_FOLLOWUP',
+  'EMAIL_OFFER',
+  'CALLBACK',
+  'OPERATOR_TASK',
+  'HUMAN_TRANSFER',
+  'DO_NOT_CONTACT',
+]);
+
 const normaliseSentiment = (raw: string | undefined): Sentiment | null => {
   if (!raw) return null;
   const upper = raw.trim().toUpperCase();
   return SENTIMENT_VALUES.has(upper as Sentiment) ? (upper as Sentiment) : null;
+};
+
+const normaliseAction = (raw: string | undefined): AiActionRequired | null => {
+  if (!raw) return null;
+  const upper = raw.trim().toUpperCase();
+  return AI_ACTION_VALUES.has(upper as AiActionRequired)
+    ? (upper as AiActionRequired)
+    : null;
+};
+
+const normaliseKeyTopics = (raw: unknown): string[] | null => {
+  if (!Array.isArray(raw)) return null;
+  const out = raw
+    .filter((v): v is string => typeof v === 'string')
+    .map((v) => v.trim())
+    .filter((v) => v.length > 0);
+  return out.length > 0 ? out : null;
+};
+
+const normaliseInterestLevel = (raw: unknown): number | null => {
+  if (typeof raw !== 'number' || !Number.isFinite(raw)) return null;
+  // Clamp into 1-5 range; round to integer. Out-of-range silently clamped
+  // rather than rejected so a stray 0/6 from the analyser doesn't drop the
+  // whole enrichment write.
+  return Math.max(1, Math.min(5, Math.round(raw)));
 };
 
 type EnrichmentResult = {
@@ -142,11 +192,11 @@ const handler = async (
   const correlationId = data.correlationId ?? match.correlationId;
   if (correlationId) updateData.correlationId = correlationId;
   // RICH_TEXT v2 fields expect { markdown: string } shape; wrap plain strings.
-  if (typeof data.transcript === 'string') {
-    updateData.transcript = { markdown: data.transcript };
+  if (typeof data.aiTranscript === 'string') {
+    updateData.aiTranscript = { markdown: data.aiTranscript };
   }
-  if (typeof data.summary === 'string') {
-    updateData.summary = { markdown: data.summary };
+  if (typeof data.aiSummary === 'string') {
+    updateData.summary = { markdown: data.aiSummary };
   }
   if (typeof data.recordingUrl === 'string' && data.recordingUrl.length > 0) {
     updateData.recording = {
@@ -154,6 +204,15 @@ const handler = async (
       primaryLinkUrl: data.recordingUrl,
     };
   }
+  const interestLevel = normaliseInterestLevel(data.aiInterestLevel);
+  if (interestLevel !== null) updateData.aiInterestLevel = interestLevel;
+  const action = normaliseAction(data.aiActionRequired);
+  if (action) updateData.aiActionRequired = action;
+  if (typeof data.aiActionContext === 'string' && data.aiActionContext.trim().length > 0) {
+    updateData.aiActionContext = data.aiActionContext.trim();
+  }
+  const keyTopics = normaliseKeyTopics(data.aiKeyTopics);
+  if (keyTopics) updateData.aiKeyTopics = keyTopics;
 
   if (Object.keys(updateData).length === 0) {
     return {

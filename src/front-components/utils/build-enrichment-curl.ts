@@ -22,9 +22,13 @@ export const buildEnrichmentCurl = (endpointUrl: string): string => {
       aiSuccessful: true,
       aiTransferred: false,
       aiCost: { amountMicros: 0, currencyCode: 'USD' },
-      summary: '<summary>',
-      transcript: '<transcript>',
+      aiSummary: '<summary>',
+      aiTranscript: '<transcript>',
       recordingUrl: '<recording_url>',
+      aiInterestLevel: 4,
+      aiActionRequired: 'OPERATOR_TASK',
+      aiActionContext: '<action_context>',
+      aiKeyTopics: ['<topic_1>', 'objection:<reason>'],
     },
   };
   // JSON.stringify outputs valid JSON with double-quoted keys/strings — pasteable
