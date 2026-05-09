@@ -36,7 +36,7 @@ pbxCallId,callType,callStart,duration,disposition,clientNumber,ourNumber,interna
 
 \* Required to allow auto-link to Person; rows missing it import successfully but stay orphan.
 
-Optional fields (`recording.*`, `transcript`, `summary`, `cost.*`, `callPath`) are accepted by Twenty Import if you add the columns; the bundled transformers leave them empty for one-shot historical migrations.
+Optional fields (`recording.*`, `transcript`, `summary`, `cost.*`) are accepted by Twenty Import if you add the columns; the bundled transformers leave them empty for one-shot historical migrations.
 
 ### `smsLog`
 
