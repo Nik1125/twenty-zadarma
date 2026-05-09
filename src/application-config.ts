@@ -5,6 +5,8 @@ import { ZADARMA_SETTINGS_FRONT_COMPONENT_UNIVERSAL_IDENTIFIER } from 'src/front
 import {
   ACTIVE_CALL_COOLDOWN_MINUTES_VARIABLE_UNIVERSAL_IDENTIFIER,
   AI_EXTENSIONS_VARIABLE_UNIVERSAL_IDENTIFIER,
+  AI_RATE_CURRENCY_VARIABLE_UNIVERSAL_IDENTIFIER,
+  AI_RATE_PER_MINUTE_VARIABLE_UNIVERSAL_IDENTIFIER,
   APP_DESCRIPTION,
   APP_DISPLAY_NAME,
   APPLICATION_UNIVERSAL_IDENTIFIER,
@@ -12,6 +14,8 @@ import {
   DEFAULT_ROLE_UNIVERSAL_IDENTIFIER,
   DEFAULT_SENDER_DID_VARIABLE_UNIVERSAL_IDENTIFIER,
   ZADARMA_CABINET_TIMEZONE_VARIABLE_UNIVERSAL_IDENTIFIER,
+  ZADARMA_RATE_CURRENCY_VARIABLE_UNIVERSAL_IDENTIFIER,
+  ZADARMA_RATE_PER_MINUTE_VARIABLE_UNIVERSAL_IDENTIFIER,
   ZADARMA_SECRET_VARIABLE_UNIVERSAL_IDENTIFIER,
   ZADARMA_TRANSCRIPT_ENABLED_VARIABLE_UNIVERSAL_IDENTIFIER,
   ZADARMA_USER_KEY_VARIABLE_UNIVERSAL_IDENTIFIER,
@@ -93,6 +97,35 @@ export default defineApplication({
       description:
         '[Manage in Custom tab] Default ± window (seconds) for fuzzy match in /zadarma/call-enrichment. Adapters can override per-request via match.windowSeconds. Default: 90, range 1-600.',
       value: '90',
+    },
+    // Per-minute outbound call rate for Zadarma (HUMAN / UNKNOWN callerType).
+    // Used at sync time and by /zadarma/recompute-costs to fill callLog.cost
+    // from `(duration / 60) × rate`. Inbound calls always get cost=null
+    // (the called party pays, not us). Empty rate or invalid number → cost
+    // stays null (no inference, no surprise charges in dashboards).
+    ZADARMA_RATE_PER_MINUTE: {
+      universalIdentifier: ZADARMA_RATE_PER_MINUTE_VARIABLE_UNIVERSAL_IDENTIFIER,
+      description:
+        '[Manage in Custom tab] Per-minute outbound rate for Zadarma calls (HUMAN / UNKNOWN). Decimal in your tariff currency (e.g. "0.05" for 5 cents/min). Empty = cost not computed. Inbound calls are always null.',
+      value: '',
+    },
+    ZADARMA_RATE_CURRENCY: {
+      universalIdentifier: ZADARMA_RATE_CURRENCY_VARIABLE_UNIVERSAL_IDENTIFIER,
+      description:
+        '[Manage in Custom tab] ISO 4217 currency code for the Zadarma per-minute rate (USD, EUR, PLN, …). Required when ZADARMA_RATE_PER_MINUTE is set.',
+      value: '',
+    },
+    AI_RATE_PER_MINUTE: {
+      universalIdentifier: AI_RATE_PER_MINUTE_VARIABLE_UNIVERSAL_IDENTIFIER,
+      description:
+        '[Manage in Custom tab] Per-minute outbound rate for AI calls (callerType=AI). Decimal in your AI vendor tariff currency (e.g. "0.50"). Combines vendor minute price + telecom minute price into one figure.',
+      value: '',
+    },
+    AI_RATE_CURRENCY: {
+      universalIdentifier: AI_RATE_CURRENCY_VARIABLE_UNIVERSAL_IDENTIFIER,
+      description:
+        '[Manage in Custom tab] ISO 4217 currency code for the AI per-minute rate. Required when AI_RATE_PER_MINUTE is set.',
+      value: '',
     },
   },
 });

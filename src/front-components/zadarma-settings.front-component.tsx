@@ -118,16 +118,27 @@ const ZadarmaSettings = () => {
   const [enrichResult, setEnrichResult] = useState<string | null>(null);
   const [enrichStartedAt, setEnrichStartedAt] = useState<number | null>(null);
 
+  // Per-minute outbound rates for cost computation.
+  const [zadarmaRatePerMinute, setZadarmaRatePerMinute] = useState<string>('');
+  const [zadarmaRateCurrency, setZadarmaRateCurrency] = useState<string>('');
+  const [aiRatePerMinute, setAiRatePerMinute] = useState<string>('');
+  const [aiRateCurrency, setAiRateCurrency] = useState<string>('');
+
+  // Recompute all callLog.cost values (back-fill / on-rate-change re-fill).
+  const [recomputingCosts, setRecomputingCosts] = useState(false);
+  const [recomputeCostsResult, setRecomputeCostsResult] = useState<string | null>(null);
+  const [recomputeCostsStartedAt, setRecomputeCostsStartedAt] = useState<number | null>(null);
+
   // Tick state forces a re-render every second while a long-running button
   // is in flight, so the label can show elapsed seconds. Without this the UI
   // looks frozen for ~minutes on long syncs / back-fills, and the user can't
   // tell whether the call is alive or hung.
   const [, setElapsedTick] = useState(0);
   useEffect(() => {
-    if (!syncing && !enriching) return;
+    if (!syncing && !enriching && !recomputingCosts) return;
     const id = setInterval(() => setElapsedTick((t) => t + 1), 1000);
     return () => clearInterval(id);
-  }, [syncing, enriching]);
+  }, [syncing, enriching, recomputingCosts]);
 
   const elapsedLabel = (startedAt: number | null): string => {
     if (startedAt === null) return '';
@@ -192,9 +203,17 @@ const ZadarmaSettings = () => {
       const did = vars.find((v) => v.key === 'DEFAULT_SENDER_DID')?.value ?? '';
       const tr = (vars.find((v) => v.key === 'ZADARMA_TRANSCRIPT_ENABLED')?.value ?? 'true').toLowerCase();
       const tz = vars.find((v) => v.key === 'ZADARMA_CABINET_TIMEZONE')?.value ?? '';
+      const zRate = vars.find((v) => v.key === 'ZADARMA_RATE_PER_MINUTE')?.value ?? '';
+      const zCur = vars.find((v) => v.key === 'ZADARMA_RATE_CURRENCY')?.value ?? '';
+      const aRate = vars.find((v) => v.key === 'AI_RATE_PER_MINUTE')?.value ?? '';
+      const aCur = vars.find((v) => v.key === 'AI_RATE_CURRENCY')?.value ?? '';
       setDefaultSenderDid(did);
       setTranscriptEnabled(tr !== 'false' && tr !== '0');
       setCabinetTimezone(tz);
+      setZadarmaRatePerMinute(zRate);
+      setZadarmaRateCurrency(zCur);
+      setAiRatePerMinute(aRate);
+      setAiRateCurrency(aCur);
       // Open free-text mode when the persisted value is not in our common list.
       if (tz && !COMMON_IANA_TIMEZONES.includes(tz)) {
         setTzCustomMode(true);
@@ -302,6 +321,7 @@ const ZadarmaSettings = () => {
         skippedDup?: number;
         linked?: number;
         failed?: number;
+        costed?: number;
         windowFrom?: string;
         windowTo?: string;
       };
@@ -310,8 +330,9 @@ const ZadarmaSettings = () => {
           json.windowFrom && json.windowTo
             ? ` (${json.windowFrom.slice(0, 16).replace('T', ' ')} → ${json.windowTo.slice(0, 16).replace('T', ' ')} UTC)`
             : '';
+        const costPart = (json.costed ?? 0) > 0 ? `, cost ${json.costed}` : '';
         setSyncResult(
-          `Created ${json.created ?? 0} new (skipped ${json.skippedDup ?? 0} dup, linked ${json.linked ?? 0}, fetched ${json.fetched ?? 0})${window}.`,
+          `Created ${json.created ?? 0} new (skipped ${json.skippedDup ?? 0} dup, linked ${json.linked ?? 0}${costPart}, fetched ${json.fetched ?? 0})${window}.`,
         );
         await fetchOrphanCounts();
         await fetchLastContactedCounts();
@@ -387,6 +408,78 @@ const ZadarmaSettings = () => {
       setEnriching(false);
       setEnrichStartedAt(null);
     }
+  };
+
+  const runRecomputeCosts = async () => {
+    if (!apiBaseUrl || !accessToken || recomputingCosts) return;
+    setRecomputingCosts(true);
+    setRecomputeCostsStartedAt(Date.now());
+    setRecomputeCostsResult(null);
+    try {
+      // Drain pages until hasMore=false, so the user gets a single
+      // "everything is up to date" terminal message even on workspaces
+      // with thousands of callLogs. The endpoint's per-call limit
+      // (default 250, max 500) protects the logic-function timeout;
+      // we just iterate.
+      let totalUpdated = 0;
+      let totalCleared = 0;
+      let totalUnchanged = 0;
+      let totalScanned = 0;
+      let totalFailed = 0;
+      for (;;) {
+        const r = await fetch(`${apiBaseUrl}/s/zadarma/recompute-costs`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${accessToken}`,
+          },
+          body: JSON.stringify({}),
+        });
+        const json = (await r.json()) as {
+          ok?: boolean;
+          error?: string;
+          scanned?: number;
+          picked?: number;
+          updated?: number;
+          unchanged?: number;
+          cleared?: number;
+          failed?: number;
+          hasMore?: boolean;
+        };
+        if (!json.ok) {
+          setRecomputeCostsResult(`Recompute failed: ${json.error ?? 'unknown error'}`);
+          return;
+        }
+        totalUpdated += json.updated ?? 0;
+        totalCleared += json.cleared ?? 0;
+        totalUnchanged += json.unchanged ?? 0;
+        totalScanned += json.scanned ?? 0;
+        totalFailed += json.failed ?? 0;
+        if (!json.hasMore) break;
+      }
+      if (totalUpdated === 0 && totalCleared === 0) {
+        setRecomputeCostsResult(
+          `Nothing to update — every outbound callLog already matches the configured rates (scanned ${totalScanned}, unchanged ${totalUnchanged}).`,
+        );
+      } else {
+        setRecomputeCostsResult(
+          `Updated ${totalUpdated} (cleared ${totalCleared}) of ${totalScanned} scanned. Unchanged ${totalUnchanged}${totalFailed > 0 ? `, failed ${totalFailed}` : ''}.`,
+        );
+      }
+    } catch (e) {
+      setRecomputeCostsResult(e instanceof Error ? e.message : String(e));
+    } finally {
+      setRecomputingCosts(false);
+      setRecomputeCostsStartedAt(null);
+    }
+  };
+
+  const saveRateAndRecompute = async (key: string, value: string) => {
+    await updateAppVar(key, value);
+    // Auto-fire recompute so analytics reflect the new rate immediately
+    // — closest we can get to a Google-Sheets-style live formula in a
+    // schema-stored CURRENCY field.
+    runRecomputeCosts();
   };
 
   const runRecompute = async () => {
@@ -1183,6 +1276,91 @@ const ZadarmaSettings = () => {
           {enrichResult && (
             <span style={{ fontSize: 12, color: 'var(--t-font-color-secondary)' }}>
               {enrichResult}
+            </span>
+          )}
+        </div>
+      </div>
+
+      {/* ── 4a-ter. Cost rates & recompute */}
+      <div style={section}>
+        <div style={sectionTitle}>Cost rates &amp; recompute</div>
+        <div style={sectionHelp}>
+          Zadarma's API doesn't expose per-call cost on most tariffs, so we compute it from a
+          per-minute rate × <code>duration / 60</code>. Set rates once below; sync uses them on every
+          new row, and changing a rate auto-fires a recompute over every existing outbound row so
+          dashboards stay in sync. Inbound calls are always <code>null</code> — the called party pays.
+          Empty rate = cost not computed for that callerType bucket.
+        </div>
+
+        <div style={row}>
+          <span style={labelCol}>Zadarma rate /min</span>
+          <input
+            type="text"
+            value={zadarmaRatePerMinute}
+            onChange={(e: { detail?: { value?: string } }) => setZadarmaRatePerMinute(e.detail?.value ?? '')}
+            onBlur={() => saveRateAndRecompute('ZADARMA_RATE_PER_MINUTE', zadarmaRatePerMinute.trim())}
+            disabled={!appId || savingVar === 'ZADARMA_RATE_PER_MINUTE'}
+            placeholder="0.05"
+            style={{ width: 120, padding: '4px 8px', fontSize: 12, fontFamily: 'inherit' }}
+          />
+          <input
+            type="text"
+            value={zadarmaRateCurrency}
+            onChange={(e: { detail?: { value?: string } }) => setZadarmaRateCurrency((e.detail?.value ?? '').toUpperCase())}
+            onBlur={() => saveRateAndRecompute('ZADARMA_RATE_CURRENCY', zadarmaRateCurrency.trim().toUpperCase())}
+            disabled={!appId || savingVar === 'ZADARMA_RATE_CURRENCY'}
+            placeholder="USD"
+            maxLength={3}
+            style={{ width: 70, padding: '4px 8px', fontSize: 12, fontFamily: 'inherit', marginLeft: 8 }}
+          />
+          {(savingVar === 'ZADARMA_RATE_PER_MINUTE' || savingVar === 'ZADARMA_RATE_CURRENCY') && (
+            <span style={{ fontSize: 11, color: 'var(--t-font-color-secondary)', marginLeft: 8 }}>saving…</span>
+          )}
+        </div>
+
+        <div style={row}>
+          <span style={labelCol}>AI rate /min</span>
+          <input
+            type="text"
+            value={aiRatePerMinute}
+            onChange={(e: { detail?: { value?: string } }) => setAiRatePerMinute(e.detail?.value ?? '')}
+            onBlur={() => saveRateAndRecompute('AI_RATE_PER_MINUTE', aiRatePerMinute.trim())}
+            disabled={!appId || savingVar === 'AI_RATE_PER_MINUTE'}
+            placeholder="0.50"
+            style={{ width: 120, padding: '4px 8px', fontSize: 12, fontFamily: 'inherit' }}
+          />
+          <input
+            type="text"
+            value={aiRateCurrency}
+            onChange={(e: { detail?: { value?: string } }) => setAiRateCurrency((e.detail?.value ?? '').toUpperCase())}
+            onBlur={() => saveRateAndRecompute('AI_RATE_CURRENCY', aiRateCurrency.trim().toUpperCase())}
+            disabled={!appId || savingVar === 'AI_RATE_CURRENCY'}
+            placeholder="USD"
+            maxLength={3}
+            style={{ width: 70, padding: '4px 8px', fontSize: 12, fontFamily: 'inherit', marginLeft: 8 }}
+          />
+          {(savingVar === 'AI_RATE_PER_MINUTE' || savingVar === 'AI_RATE_CURRENCY') && (
+            <span style={{ fontSize: 11, color: 'var(--t-font-color-secondary)', marginLeft: 8 }}>saving…</span>
+          )}
+        </div>
+
+        <div style={{ ...sectionHelp, marginLeft: 138, marginTop: 4 }}>
+          Saving any rate above auto-recomputes every outbound callLog. The button below is for
+          manual re-runs (e.g. after a duration backfill or migration).
+        </div>
+
+        <div style={{ marginTop: 12, display: 'flex', alignItems: 'center', gap: 12 }}>
+          <button
+            type="button"
+            style={button('primary', recomputingCosts)}
+            onClick={() => runRecomputeCosts()}
+            disabled={recomputingCosts}
+          >
+            {recomputingCosts ? `Recomputing… (${elapsedLabel(recomputeCostsStartedAt)})` : 'Recompute all costs'}
+          </button>
+          {recomputeCostsResult && (
+            <span style={{ fontSize: 12, color: 'var(--t-font-color-secondary)' }}>
+              {recomputeCostsResult}
             </span>
           )}
         </div>
