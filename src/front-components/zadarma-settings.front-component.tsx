@@ -112,6 +112,10 @@ const ZadarmaSettings = () => {
   const [syncing, setSyncing] = useState(false);
   const [syncResult, setSyncResult] = useState<string | null>(null);
 
+  // Enrich existing callLogs with recordings + transcripts (back-fill).
+  const [enriching, setEnriching] = useState(false);
+  const [enrichResult, setEnrichResult] = useState<string | null>(null);
+
   // datetime-local values are interpreted in the browser's local timezone, then
   // converted to UTC ISO. For users whose browser TZ matches the cabinet TZ
   // this matches what they see in the Zadarma cabinet. The 1h overlap default
@@ -295,6 +299,67 @@ const ZadarmaSettings = () => {
       setSyncResult(e instanceof Error ? e.message : String(e));
     } finally {
       setSyncing(false);
+    }
+  };
+
+  const runEnrich = async () => {
+    if (!apiBaseUrl || !accessToken || enriching) return;
+    setEnriching(true);
+    setEnrichResult(null);
+    try {
+      const r = await fetch(`${apiBaseUrl}/s/zadarma/enrich-call-logs`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${accessToken}`,
+        },
+        body: JSON.stringify({}),
+      });
+      const json = (await r.json()) as {
+        ok?: boolean;
+        error?: string;
+        scanned?: number;
+        pickedForEnrichment?: number;
+        enrichment?: {
+          processed?: number;
+          enrichedRecording?: number;
+          enrichedTranscript?: number;
+          skippedShort?: number;
+          skippedNoCallId?: number;
+          transcriptInProgress?: number;
+          transcriptNotAvailable?: number;
+          recordingFailed?: number;
+          transcriptFailed?: number;
+          mutationFailed?: number;
+          budgetExceeded?: number;
+        } | null;
+      };
+      if (!json.ok) {
+        setEnrichResult(`Enrichment failed: ${json.error ?? 'unknown error'}`);
+        return;
+      }
+      const e = json.enrichment;
+      if (!e || (json.pickedForEnrichment ?? 0) === 0) {
+        setEnrichResult('Nothing to enrich — every callLog already has a recording / transcript.');
+        return;
+      }
+      const parts = [
+        `recordings ${e.enrichedRecording ?? 0}`,
+        `transcripts ${e.enrichedTranscript ?? 0}`,
+      ];
+      if ((e.skippedNoCallId ?? 0) > 0) parts.push(`skippedNoCallId ${e.skippedNoCallId}`);
+      if ((e.transcriptInProgress ?? 0) > 0) parts.push(`inProgress ${e.transcriptInProgress}`);
+      if ((e.transcriptNotAvailable ?? 0) > 0) parts.push(`unavailable ${e.transcriptNotAvailable}`);
+      if ((e.recordingFailed ?? 0) > 0) parts.push(`recFail ${e.recordingFailed}`);
+      if ((e.transcriptFailed ?? 0) > 0) parts.push(`trFail ${e.transcriptFailed}`);
+      if ((e.budgetExceeded ?? 0) > 0) parts.push(`budgetExceeded ${e.budgetExceeded}`);
+      setEnrichResult(
+        `Processed ${e.processed ?? 0} of ${json.pickedForEnrichment} (scanned ${json.scanned ?? 0}). ${parts.join(', ')}. Click again to continue.`,
+      );
+    } catch (e) {
+      setEnrichResult(e instanceof Error ? e.message : String(e));
+    } finally {
+      setEnriching(false);
     }
   };
 
@@ -1061,6 +1126,37 @@ const ZadarmaSettings = () => {
           {syncResult && (
             <span style={{ fontSize: 12, color: 'var(--t-font-color-secondary)' }}>
               {syncResult}
+            </span>
+          )}
+        </div>
+      </div>
+
+      {/* ── 4a-bis. Enrich missing recordings & transcripts */}
+      <div style={section}>
+        <div style={sectionTitle}>Enrich missing recordings &amp; transcripts</div>
+        <div style={sectionHelp}>
+          Adds Zadarma recording links and speech-recognition transcripts to existing callLog rows that lack
+          them — typically rows synced before v0.17.0 (when this enrichment was added to the sync pipeline)
+          or rows whose initial enrichment was deferred because the sync batch was too large.
+          {' '}
+          Skips calls shorter than 10 s (autoresponder / hang-ups). Transcript back-fill needs the
+          Asterisk <code>call_id</code>: legacy rows synced before v0.17.0 don't have it stored, so they
+          receive the recording link but no transcript. Newly synced rows have both. Idempotent — click
+          repeatedly until the message reads &quot;Nothing to enrich&quot;. Each click processes up to 100
+          rows over ~4 minutes (Zadarma rate-limit).
+        </div>
+        <div style={{ marginTop: 12, display: 'flex', alignItems: 'center', gap: 12 }}>
+          <button
+            type="button"
+            style={button('primary', enriching)}
+            onClick={() => runEnrich()}
+            disabled={enriching}
+          >
+            {enriching ? 'Enriching…' : 'Enrich missing'}
+          </button>
+          {enrichResult && (
+            <span style={{ fontSize: 12, color: 'var(--t-font-color-secondary)' }}>
+              {enrichResult}
             </span>
           )}
         </div>

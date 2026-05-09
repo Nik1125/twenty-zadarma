@@ -47,6 +47,8 @@ export const CALL_LOG_CORRELATION_ID_FIELD_UNIVERSAL_IDENTIFIER =
   '6b1e9c34-4d27-4f58-a803-2e9c8f5b7d61';
 export const CALL_LOG_CALLER_TYPE_FIELD_UNIVERSAL_IDENTIFIER =
   'e97926fb-321f-456d-8350-cca6ae9e6530';
+export const CALL_LOG_CALL_ID_FIELD_UNIVERSAL_IDENTIFIER =
+  '2b1a7c93-4e58-4fb2-9de7-3a8c5f1d2e64';
 
 export default defineObject({
   universalIdentifier: CALL_LOG_OBJECT_UNIVERSAL_IDENTIFIER,
@@ -77,6 +79,16 @@ export default defineObject({
       description: 'Unique Zadarma identifier (from webhook pbx_call_id or CSV call_id)',
       icon: 'IconHash',
       isUnique: true,
+    },
+    {
+      universalIdentifier: CALL_LOG_CALL_ID_FIELD_UNIVERSAL_IDENTIFIER,
+      type: FieldType.TEXT,
+      name: 'callId',
+      label: 'Call ID (Asterisk)',
+      description:
+        'Asterisk channel id (Zadarma stats `call_id`). Required by /v1/speech_recognition/ to fetch a transcript for an already-completed call. Filled by sync-zadarma-calls; null on legacy rows synced before v0.17.0.',
+      icon: 'IconHash',
+      isNullable: true,
     },
     {
       universalIdentifier: CALL_LOG_CALL_TYPE_FIELD_UNIVERSAL_IDENTIFIER,

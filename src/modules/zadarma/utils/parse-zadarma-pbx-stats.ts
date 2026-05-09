@@ -23,6 +23,7 @@ export type ZadarmaPbxStatRow = {
 
 export type CanonicalCallLogRow = {
   pbxCallId: string;
+  callId: string | null;
   callType: 'IN' | 'OUT';
   callStart: string | null;
   duration: number;
@@ -144,8 +145,10 @@ export const groupAndNormalizeStats = (
     const startedHM = root.callstart ? root.callstart.slice(0, 16) : '';
     const name = `${callType} ${clientNumber || '?'}${startedHM ? ` — ${startedHM}` : ''}`;
 
+    const callId = (root.call_id ?? '').trim();
     rows.push({
       pbxCallId,
+      callId: callId || null,
       callType,
       callStart,
       duration: totalSeconds,
