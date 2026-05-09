@@ -7,6 +7,8 @@ import {
   AI_EXTENSIONS_VARIABLE_UNIVERSAL_IDENTIFIER,
   AI_RATE_CURRENCY_VARIABLE_UNIVERSAL_IDENTIFIER,
   AI_RATE_PER_MINUTE_VARIABLE_UNIVERSAL_IDENTIFIER,
+  ZADARMA_AUTO_CREATE_PERSON_VARIABLE_UNIVERSAL_IDENTIFIER,
+  TEAMSALE_BASE_URL_VARIABLE_UNIVERSAL_IDENTIFIER,
   APP_DESCRIPTION,
   APP_DISPLAY_NAME,
   APPLICATION_UNIVERSAL_IDENTIFIER,
@@ -125,6 +127,31 @@ export default defineApplication({
       universalIdentifier: AI_RATE_CURRENCY_VARIABLE_UNIVERSAL_IDENTIFIER,
       description:
         '[Manage in Custom tab] ISO 4217 currency code for the AI per-minute rate. Required when AI_RATE_PER_MINUTE is set.',
+      value: '',
+    },
+    // Toggle for the inbound webhook auto-create-Person branch. When true,
+    // a NOTIFY_END / NOTIFY_OUT_END event from a number that does not
+    // match any Person in Twenty creates a Person on the spot
+    // (firstName empty, lastName = clientNumber, primaryPhone = "+number").
+    // Default off — most installations route inbound numbers through their
+    // own n8n / FB-lead workflow before they reach the webhook.
+    ZADARMA_AUTO_CREATE_PERSON: {
+      universalIdentifier:
+        ZADARMA_AUTO_CREATE_PERSON_VARIABLE_UNIVERSAL_IDENTIFIER,
+      description:
+        '[Manage in Custom tab] When "true", inbound calls from unknown numbers auto-create a Person in Twenty. Accepts "true" or "false". Default: false.',
+      value: 'false',
+    },
+    // Subdomain prefix for the user's TeamSale (Zadarma free CRM)
+    // workspace, e.g. "https://yourco.teamsale.com". Doubles as the
+    // TeamSale-sync feature toggle: empty = sync disabled completely;
+    // any value → sync-person-to-teamsale fires on Person.created and the
+    // Settings backfill button is functional. The `Person.teamSaleLink`
+    // LINKS field stores the full URL on each synced Person.
+    TEAMSALE_BASE_URL: {
+      universalIdentifier: TEAMSALE_BASE_URL_VARIABLE_UNIVERSAL_IDENTIFIER,
+      description:
+        '[Manage in Custom tab] Subdomain prefix for your TeamSale (Zadarma CRM) workspace, e.g. "https://yourco.teamsale.com". Empty = TeamSale-sync disabled.',
       value: '',
     },
   },

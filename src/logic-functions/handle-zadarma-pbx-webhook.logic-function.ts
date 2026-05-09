@@ -171,6 +171,45 @@ const handleNotifyEnd = async (body: ZadarmaPbxEvent & Record<string, unknown>) 
     personId = await findPersonIdByClientNumber(client, clientNumber);
   }
 
+  // Auto-create Person from unknown caller — only when (a) no Person was
+  // matched by phone-suffix lookup, (b) we have a usable clientNumber,
+  // (c) ZADARMA_AUTO_CREATE_PERSON applicationVariable is "true". The
+  // newly-created Person triggers the standard `person.created` DB-event,
+  // which (when TEAMSALE_BASE_URL is set) cascades into TeamSale-link
+  // back-fill. Default off — most installations route inbound numbers
+  // through their own n8n / FB-lead workflow before the webhook fires.
+  if (!personId && clientNumber) {
+    const autoCreate =
+      (process.env.ZADARMA_AUTO_CREATE_PERSON ?? '').trim().toLowerCase() ===
+      'true';
+    if (autoCreate) {
+      try {
+        const created = (await client.mutation({
+          createPerson: {
+            __args: {
+              data: {
+                name: { firstName: '', lastName: clientNumber },
+                phones: { primaryPhoneNumber: '+' + clientNumber },
+              },
+            },
+            id: true,
+          },
+        })) as { createPerson?: { id: string } };
+        personId = created.createPerson?.id ?? null;
+        if (personId) {
+          console.log(
+            `[zadarma-pbx-webhook] NOTIFY_END auto-created personId=${personId} for unknown clientNumber=${clientNumber}`,
+          );
+        }
+      } catch (err) {
+        console.warn(
+          `[zadarma-pbx-webhook] NOTIFY_END auto-create person failed for ${clientNumber}:`,
+          err,
+        );
+      }
+    }
+  }
+
   const existingId = await findCallLogIdByPbxCallId(client, pbxCallId);
   const disposition = mapDisposition(body.disposition);
   const duration = parseDuration(body.duration);

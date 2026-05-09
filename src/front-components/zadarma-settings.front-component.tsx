@@ -129,16 +129,23 @@ const ZadarmaSettings = () => {
   const [recomputeCostsResult, setRecomputeCostsResult] = useState<string | null>(null);
   const [recomputeCostsStartedAt, setRecomputeCostsStartedAt] = useState<number | null>(null);
 
+  // TeamSale (Zadarma free CRM) backup link state.
+  const [teamsaleBaseUrl, setTeamsaleBaseUrl] = useState<string>('');
+  const [autoCreatePerson, setAutoCreatePerson] = useState<boolean>(false);
+  const [teamsaleSyncing, setTeamsaleSyncing] = useState(false);
+  const [teamsaleSyncResult, setTeamsaleSyncResult] = useState<string | null>(null);
+  const [teamsaleSyncStartedAt, setTeamsaleSyncStartedAt] = useState<number | null>(null);
+
   // Tick state forces a re-render every second while a long-running button
   // is in flight, so the label can show elapsed seconds. Without this the UI
   // looks frozen for ~minutes on long syncs / back-fills, and the user can't
   // tell whether the call is alive or hung.
   const [, setElapsedTick] = useState(0);
   useEffect(() => {
-    if (!syncing && !enriching && !recomputingCosts) return;
+    if (!syncing && !enriching && !recomputingCosts && !teamsaleSyncing) return;
     const id = setInterval(() => setElapsedTick((t) => t + 1), 1000);
     return () => clearInterval(id);
-  }, [syncing, enriching, recomputingCosts]);
+  }, [syncing, enriching, recomputingCosts, teamsaleSyncing]);
 
   const elapsedLabel = (startedAt: number | null): string => {
     if (startedAt === null) return '';
@@ -207,6 +214,8 @@ const ZadarmaSettings = () => {
       const zCur = vars.find((v) => v.key === 'ZADARMA_RATE_CURRENCY')?.value ?? '';
       const aRate = vars.find((v) => v.key === 'AI_RATE_PER_MINUTE')?.value ?? '';
       const aCur = vars.find((v) => v.key === 'AI_RATE_CURRENCY')?.value ?? '';
+      const tsUrl = vars.find((v) => v.key === 'TEAMSALE_BASE_URL')?.value ?? '';
+      const acpRaw = (vars.find((v) => v.key === 'ZADARMA_AUTO_CREATE_PERSON')?.value ?? 'false').toLowerCase();
       setDefaultSenderDid(did);
       setTranscriptEnabled(tr !== 'false' && tr !== '0');
       setCabinetTimezone(tz);
@@ -214,6 +223,8 @@ const ZadarmaSettings = () => {
       setZadarmaRateCurrency(zCur);
       setAiRatePerMinute(aRate);
       setAiRateCurrency(aCur);
+      setTeamsaleBaseUrl(tsUrl);
+      setAutoCreatePerson(acpRaw === 'true' || acpRaw === '1');
       // Open free-text mode when the persisted value is not in our common list.
       if (tz && !COMMON_IANA_TIMEZONES.includes(tz)) {
         setTzCustomMode(true);
@@ -480,6 +491,78 @@ const ZadarmaSettings = () => {
     // — closest we can get to a Google-Sheets-style live formula in a
     // schema-stored CURRENCY field.
     runRecomputeCosts();
+  };
+
+  // Drains pagination by calling /zadarma/teamsale-backfill until
+  // hasMore=false. Each call processes up to ~200 Persons over a 280s
+  // soft budget (the function has 300s hard timeout). Idempotent —
+  // already-linked Persons are filtered at the query layer.
+  const runTeamsaleBackfill = async () => {
+    if (!apiBaseUrl || !accessToken || teamsaleSyncing) return;
+    if (!teamsaleBaseUrl.trim()) {
+      setTeamsaleSyncResult('Set TeamSale base URL first.');
+      return;
+    }
+    setTeamsaleSyncing(true);
+    setTeamsaleSyncResult(null);
+    setTeamsaleSyncStartedAt(Date.now());
+    try {
+      let totalScanned = 0;
+      let totalSynced = 0;
+      let totalSkipped = 0;
+      let totalRateLimited = 0;
+      let totalFailed = 0;
+      let safetyCounter = 0;
+      // eslint-disable-next-line no-constant-condition
+      while (true) {
+        if (++safetyCounter > 25) break; // soft cap ~25 × 200 = 5000 Persons / click
+        const r = await fetch(`${apiBaseUrl}/s/zadarma/teamsale-backfill`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${accessToken}`,
+          },
+          body: JSON.stringify({}),
+        });
+        const json = (await r.json()) as {
+          ok?: boolean;
+          error?: string;
+          scanned?: number;
+          synced?: number;
+          skipped?: number;
+          rateLimited?: number;
+          failed?: number;
+          hasMore?: boolean;
+          budgetExceeded?: boolean;
+        };
+        if (!json.ok) {
+          setTeamsaleSyncResult(`Backfill failed: ${json.error ?? 'unknown error'}`);
+          return;
+        }
+        totalScanned += json.scanned ?? 0;
+        totalSynced += json.synced ?? 0;
+        totalSkipped += json.skipped ?? 0;
+        totalRateLimited += json.rateLimited ?? 0;
+        totalFailed += json.failed ?? 0;
+        if (!json.hasMore) break;
+      }
+      if (totalScanned === 0) {
+        setTeamsaleSyncResult(
+          'Nothing to sync — every Person with a primary phone already has a TeamSale link.',
+        );
+      } else {
+        const parts = [`Synced ${totalSynced} of ${totalScanned}`];
+        if (totalSkipped > 0) parts.push(`skipped ${totalSkipped}`);
+        if (totalRateLimited > 0) parts.push(`rate-limited ${totalRateLimited}`);
+        if (totalFailed > 0) parts.push(`failed ${totalFailed}`);
+        setTeamsaleSyncResult(parts.join(', ') + '.');
+      }
+    } catch (e) {
+      setTeamsaleSyncResult(e instanceof Error ? e.message : String(e));
+    } finally {
+      setTeamsaleSyncing(false);
+      setTeamsaleSyncStartedAt(null);
+    }
   };
 
   const runRecompute = async () => {
@@ -1363,6 +1446,83 @@ const ZadarmaSettings = () => {
               {recomputeCostsResult}
             </span>
           )}
+        </div>
+      </div>
+
+      {/* ── 4a-quater. TeamSale backup link */}
+      <div style={section}>
+        <div style={sectionTitle}>TeamSale backup</div>
+        <div style={sectionHelp}>
+          Mirrors every Person in Twenty to a lead in your TeamSale (Zadarma free CRM) workspace
+          and stores a clickable backlink in <code>Person.teamSaleLink</code>. TeamSale logs every
+          call/SMS automatically — useful as a parallel source of truth in case of CRM data loss.
+          Sync fires automatically on every Person <em>create</em> event (FB n8n flow, inbound
+          webhook auto-create, manual UI, CSV import — all paths). Idempotent: already-linked
+          Persons are skipped at the query layer.
+        </div>
+
+        <div style={row}>
+          <span style={labelCol}>TeamSale base URL</span>
+          <input
+            type="text"
+            value={teamsaleBaseUrl}
+            onChange={(e: { detail?: { value?: string } }) => setTeamsaleBaseUrl(e.detail?.value ?? '')}
+            onBlur={() => updateAppVar('TEAMSALE_BASE_URL', teamsaleBaseUrl.trim())}
+            disabled={!appId || savingVar === 'TEAMSALE_BASE_URL'}
+            placeholder="https://yourco.teamsale.com"
+            style={{ width: 320, padding: '4px 8px', fontSize: 12, fontFamily: 'inherit' }}
+          />
+          {savingVar === 'TEAMSALE_BASE_URL' && (
+            <span style={{ fontSize: 11, color: 'var(--t-font-color-secondary)', marginLeft: 8 }}>saving…</span>
+          )}
+        </div>
+        <div style={{ ...sectionHelp, marginLeft: 138, marginTop: 4 }}>
+          Leave empty to disable TeamSale-sync entirely. Composed URLs use this prefix +
+          <code>/leads/&lt;lead_id&gt;</code>.
+        </div>
+
+        <div style={{ ...row, marginTop: 8 }}>
+          <span style={labelCol}>Auto-create Person</span>
+          <input
+            type="checkbox"
+            checked={autoCreatePerson}
+            onChange={(e: { detail?: { checked?: boolean } }) => {
+              const next = e.detail?.checked ?? !autoCreatePerson;
+              setAutoCreatePerson(next);
+              updateAppVar('ZADARMA_AUTO_CREATE_PERSON', next ? 'true' : 'false');
+            }}
+            disabled={!appId || savingVar === 'ZADARMA_AUTO_CREATE_PERSON'}
+            style={{ accentColor: 'var(--t-accent-color)' }}
+          />
+          <span style={{ fontSize: 11, color: 'var(--t-font-color-secondary)', marginLeft: 8 }}>
+            {autoCreatePerson
+              ? 'Inbound calls from unknown numbers create a Person automatically'
+              : 'Disabled — unknown-caller callLogs are saved without a Person link'}
+          </span>
+        </div>
+
+        <div style={{ marginTop: 12, display: 'flex', alignItems: 'center', gap: 12 }}>
+          <button
+            type="button"
+            style={button('primary', teamsaleSyncing)}
+            onClick={() => runTeamsaleBackfill()}
+            disabled={teamsaleSyncing || !teamsaleBaseUrl.trim()}
+          >
+            {teamsaleSyncing
+              ? `Syncing… (${elapsedLabel(teamsaleSyncStartedAt)})`
+              : 'Sync existing Persons to TeamSale'}
+          </button>
+          {teamsaleSyncResult && (
+            <span style={{ fontSize: 12, color: 'var(--t-font-color-secondary)' }}>
+              {teamsaleSyncResult}
+            </span>
+          )}
+        </div>
+        <div style={{ ...sectionHelp, marginLeft: 138, marginTop: 4 }}>
+          One-time sweep for Persons that pre-date the toggle (or were created during a window
+          when sync was disabled). Throttled at ~1.2s per row to stay under Zadarma's 100 req/min
+          limit; 1000 unsynced Persons take roughly 20 minutes. Filters at query layer →
+          already-linked Persons are skipped without API calls.
         </div>
       </div>
 
