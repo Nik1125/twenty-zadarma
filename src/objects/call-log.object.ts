@@ -29,8 +29,6 @@ export const CALL_LOG_SUMMARY_FIELD_UNIVERSAL_IDENTIFIER =
   '24e7ddee-a294-40cc-9ae9-f5ed8f4e993d';
 export const CALL_LOG_COST_FIELD_UNIVERSAL_IDENTIFIER =
   'fee938b8-0ba0-419d-b66e-5f6eb3f4e227';
-export const CALL_LOG_CALL_PATH_FIELD_UNIVERSAL_IDENTIFIER =
-  '0d7986c5-10f2-47c8-93e2-e3d8c3d2e26f';
 export const CALL_LOG_AI_VENDOR_FIELD_UNIVERSAL_IDENTIFIER =
   '7e2d8a91-3c4f-4b15-9e02-1f6a8d3e4c12';
 export const CALL_LOG_AI_AGENT_NAME_FIELD_UNIVERSAL_IDENTIFIER =
@@ -347,15 +345,6 @@ export default defineObject({
       label: 'Cost',
       description: 'Cost of the call as reported by Zadarma',
       icon: 'IconCurrencyDollar',
-      isNullable: true,
-    },
-    {
-      universalIdentifier: CALL_LOG_CALL_PATH_FIELD_UNIVERSAL_IDENTIFIER,
-      type: FieldType.RAW_JSON,
-      name: 'callPath',
-      label: 'Call path',
-      description: 'Raw chain of call legs from CSV import (extensions, voicemail steps)',
-      icon: 'IconRoute',
       isNullable: true,
     },
     {

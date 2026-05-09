@@ -195,6 +195,14 @@ n8n `call_analyzed` webhook payload → enrichment body:
 
 ### 1. Function node — transform Retell payload
 
+Copy verbatim into an n8n Function node placed between your Webhook (the
+one Retell posts `call_analyzed` to) and the HTTP Request node that calls
+the enrichment endpoint. The `formatTranscript` helper rewrites Retell's
+flat `Agent: ... User: ...` string into Markdown with bold speaker labels
+and paragraph breaks so the rich-text field renders nicely on the callLog
+record. Idempotent — safe to re-run on the same payload (the Retell
+`call_id` keeps re-targeting the same callLog row).
+
 ```js
 // Input: $input.first().json   (Retell call_analyzed webhook body)
 const w = $input.first().json;
@@ -207,6 +215,23 @@ const transferred =
 
 const sentimentRaw = call.call_analysis?.user_sentiment;
 const sentiment = sentimentRaw ? sentimentRaw.toUpperCase() : null;
+
+// Reformat Retell raw transcript:
+//  - insert paragraph break before each speaker turn
+//  - bold the speaker label (Agent: / User:) so rich-text renders it bold
+//  - case-insensitive match; `Assistant:` is normalised to `Agent:` for
+//    consistency
+//  - collapses 3+ consecutive newlines into a single paragraph break
+const formatTranscript = (raw) => {
+  if (typeof raw !== 'string' || !raw.trim()) return raw;
+  return raw
+    .replace(/(?:\r?\n)?\s*(Agent|User|Assistant):\s*/gi, (_, role) => {
+      const label = role.toLowerCase() === 'user' ? 'User' : 'Agent';
+      return `\n\n**${label}:** `;
+    })
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+};
 
 return [{
   json: {
@@ -230,7 +255,7 @@ return [{
           amountMicros: Math.round(call.call_cost.combined_cost * 10000),
           currencyCode: 'USD',
         } : undefined,
-        aiTranscript: call.transcript,
+        aiTranscript: formatTranscript(call.transcript),
         aiSummary: call.call_analysis?.call_summary,
         recordingUrl: call.recording_url,
         // Optional — populate from a separate post-call analyser node:
