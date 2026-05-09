@@ -50,7 +50,18 @@ export class TeamSaleRateLimitError extends TeamSaleApiError {
   }
 }
 
-const ENDPOINT_LEADS = '/v1/zcrm/leads/';
+// TeamSale CRM endpoints are NOT in Zadarma's published OpenAPI v1 spec
+// (https://github.com/zadarma/openapi/tree/master/spec/v1) but exist
+// empirically. Verified shape from a working production payload:
+//   POST https://api.zadarma.com/v1/zcrm/leads (NO trailing slash)
+//   Authorization: <user_key>:<base64_sig>
+//   body: lead[name]=...&lead[phones][0][phone]=+48...&lead[lead_source]=...
+// Note the missing trailing slash — unlike most other Zadarma endpoints
+// where a trailing slash is required for the signature to verify, the
+// TeamSale endpoints reject (or 301-redirect-and-drop-body) when the
+// slash is present. Mirror what the Zadarma user-app and n8n adapters
+// actually send rather than what the generic signing convention says.
+const ENDPOINT_LEADS = '/v1/zcrm/leads';
 
 const parseRetryAfter = (h: Headers): number => {
   const v = h.get('retry-after');
