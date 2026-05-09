@@ -5,10 +5,16 @@ import { CoreApiClient } from 'twenty-client-sdk/core';
 import { SYNC_ZADARMA_CALLS_LOGIC_FUNCTION_UNIVERSAL_IDENTIFIER } from 'src/constants/universal-identifiers';
 import { signZadarmaRequest } from 'src/modules/zadarma/connector/sign-request';
 import {
+  computeCallCostFromRate,
+  parseCostRatesFromEnv,
+} from 'src/modules/zadarma/utils/compute-call-cost-from-rate';
+import { deriveCallerType } from 'src/modules/zadarma/utils/derive-caller-type';
+import {
   enrichCallLogs,
   type EnrichInput,
   type EnrichResult,
 } from 'src/modules/zadarma/utils/enrich-call-logs';
+import { parseAiExtensions } from 'src/modules/zadarma/utils/parse-ai-extensions';
 import {
   groupAndNormalizeStats,
   type ZadarmaPbxStatRow,
@@ -244,6 +250,7 @@ type SyncResult = {
   skippedDup?: number;
   linked?: number;
   failed?: number;
+  costed?: number;
   elapsedMs?: number;
   enrichment?: EnrichResult;
 };
@@ -263,6 +270,13 @@ const handler = async (
   const secret = process.env.ZADARMA_SECRET;
   const cabinetTz = (process.env.ZADARMA_CABINET_TIMEZONE ?? '').trim();
   const ourNumber = (process.env.DEFAULT_SENDER_DID ?? '').trim();
+  const rates = parseCostRatesFromEnv({
+    ZADARMA_RATE_PER_MINUTE: process.env.ZADARMA_RATE_PER_MINUTE,
+    ZADARMA_RATE_CURRENCY: process.env.ZADARMA_RATE_CURRENCY,
+    AI_RATE_PER_MINUTE: process.env.AI_RATE_PER_MINUTE,
+    AI_RATE_CURRENCY: process.env.AI_RATE_CURRENCY,
+  });
+  const aiExtensions = parseAiExtensions(process.env.AI_EXTENSIONS);
 
   if (!userKey || !secret) {
     return { ok: false, error: 'ZADARMA_USER_KEY / ZADARMA_SECRET not set in Settings' };
@@ -372,6 +386,7 @@ const handler = async (
   let created = 0;
   let failed = 0;
   let dupRace = 0;
+  let costed = 0;
   const createdForEnrichment: EnrichInput[] = [];
 
   for (let i = 0; i < toCreate.length; i += MUTATION_BATCH) {
@@ -379,6 +394,18 @@ const handler = async (
     const results = await Promise.allSettled(
       wave.map((row) => {
         const personId = personMap.get(phoneKey(row.clientNumber) ?? '') ?? null;
+        const callerType = deriveCallerType(
+          row.internalExtension ?? undefined,
+          aiExtensions,
+        );
+        const cost = computeCallCostFromRate(
+          {
+            callType: row.callType,
+            callerType,
+            duration: row.duration,
+          },
+          rates,
+        );
         const data: Record<string, unknown> = {
           name: row.name,
           pbxCallId: row.pbxCallId,
@@ -390,6 +417,8 @@ const handler = async (
           clientNumber: row.clientNumber,
           ourNumber: row.ourNumber,
           internalExtension: row.internalExtension,
+          callerType,
+          ...(cost ? { cost } : {}),
           ...(personId ? { personId } : {}),
         };
         return client
@@ -398,6 +427,7 @@ const handler = async (
           })
           .then((res) => ({
             linked: personId !== null,
+            costed: cost !== null,
             id: (res as { createCallLog?: { id?: string } }).createCallLog?.id ?? null,
             row,
           }));
@@ -408,10 +438,12 @@ const handler = async (
         created++;
         const value = r.value as {
           linked: boolean;
+          costed: boolean;
           id: string | null;
           row: typeof toCreate[number];
         };
         if (value.linked) linked++;
+        if (value.costed) costed++;
         if (value.id) {
           createdForEnrichment.push({
             id: value.id,
@@ -474,6 +506,7 @@ const handler = async (
     skippedDup: totalSkippedDup,
     linked,
     failed,
+    costed,
     elapsedMs,
     ...(enrichment ? { enrichment } : {}),
   };
