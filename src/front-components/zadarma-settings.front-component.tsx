@@ -64,7 +64,7 @@ const ZadarmaSettings = () => {
 
   const pbxWebhookUrl = `${apiBaseUrl}/s/zadarma/pbx-webhook`;
   const eventWebhookUrl = `${apiBaseUrl}/s/zadarma-event-webhook`;
-  const enrichmentWebhookUrl = `${apiBaseUrl}/s/zadarma/call-enrichment`;
+  const enrichmentEndpointUrl = `${apiBaseUrl}/s/zadarma/call-enrichment`;
   const sendSmsWebhookUrl = `${apiBaseUrl}/s/zadarma/send-sms`;
   const enrichmentDocsUrl =
     'https://github.com/Nik1125/twenty-zadarma/blob/main/docs/AI_ENRICHMENT.md';
@@ -571,7 +571,7 @@ const ZadarmaSettings = () => {
     }
     setEnrichCheck({ status: 'pending' });
     try {
-      const r = await fetch(enrichmentWebhookUrl, {
+      const r = await fetch(enrichmentEndpointUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${accessToken}` },
         body: JSON.stringify({ match: { toNumber: '+00000000000' } }),
@@ -905,9 +905,9 @@ const ZadarmaSettings = () => {
         </div>
       </div>
 
-      {/* ── 3a. AI enrichment webhook (vendor-agnostic post-call enrichment) */}
+      {/* ── 3a. AI enrichment endpoint (vendor-agnostic post-call enrichment) */}
       <div style={section}>
-        <div style={sectionTitle}>AI enrichment webhook</div>
+        <div style={sectionTitle}>AI enrichment endpoint</div>
         <div style={sectionHelp}>
           Endpoint that accepts post-call AI analysis from any vendor (Retell via n8n, Vapi, etc.)
           and attaches it to the matching <code>callLog</code> row. Idempotent via{' '}
@@ -920,9 +920,9 @@ const ZadarmaSettings = () => {
           <span style={labelCol}>URL</span>
           <code
             style={codeBoxClickable}
-            onClick={(e) => handleCopy(enrichmentWebhookUrl, e.currentTarget as HTMLElement)}
+            onClick={(e) => handleCopy(enrichmentEndpointUrl, e.currentTarget as HTMLElement)}
           >
-            {enrichmentWebhookUrl}
+            {enrichmentEndpointUrl}
           </code>
           <button
             type="button"
@@ -962,12 +962,12 @@ const ZadarmaSettings = () => {
               }}
               onClick={(e) =>
                 handleCopy(
-                  buildEnrichmentCurl(enrichmentWebhookUrl),
+                  buildEnrichmentCurl(enrichmentEndpointUrl),
                   e.currentTarget as HTMLElement,
                 )
               }
             >
-              {buildEnrichmentCurl(enrichmentWebhookUrl)}
+              {buildEnrichmentCurl(enrichmentEndpointUrl)}
             </pre>
           </div>
         </div>
