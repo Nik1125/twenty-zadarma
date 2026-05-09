@@ -5,6 +5,11 @@ import { CoreApiClient } from 'twenty-client-sdk/core';
 import { SYNC_ZADARMA_CALLS_LOGIC_FUNCTION_UNIVERSAL_IDENTIFIER } from 'src/constants/universal-identifiers';
 import { signZadarmaRequest } from 'src/modules/zadarma/connector/sign-request';
 import {
+  enrichCallLogs,
+  type EnrichInput,
+  type EnrichResult,
+} from 'src/modules/zadarma/utils/enrich-call-logs';
+import {
   groupAndNormalizeStats,
   type ZadarmaPbxStatRow,
 } from 'src/modules/zadarma/utils/parse-zadarma-pbx-stats';
@@ -240,7 +245,15 @@ type SyncResult = {
   linked?: number;
   failed?: number;
   elapsedMs?: number;
+  enrichment?: EnrichResult;
 };
+
+// Soft budget for in-sync enrichment. Sync's logic-function timeout is 300s;
+// we reserve ~120s for enrichment (≈50 rows at 2.4s/row including throttle).
+// For larger newly-created batches the remaining rows surface as
+// `enrichment.budgetExceeded` and the user clicks "Enrich missing recordings"
+// in Settings to finish them via the dedicated backfill endpoint.
+const ENRICHMENT_BUDGET_MS = 120_000;
 
 const handler = async (
   event: RoutePayload<SyncBody>,
@@ -359,6 +372,7 @@ const handler = async (
   let created = 0;
   let failed = 0;
   let dupRace = 0;
+  const createdForEnrichment: EnrichInput[] = [];
 
   for (let i = 0; i < toCreate.length; i += MUTATION_BATCH) {
     const wave = toCreate.slice(i, i + MUTATION_BATCH);
@@ -368,6 +382,7 @@ const handler = async (
         const data: Record<string, unknown> = {
           name: row.name,
           pbxCallId: row.pbxCallId,
+          callId: row.callId,
           callType: row.callType,
           callStart: row.callStart,
           duration: row.duration,
@@ -381,13 +396,32 @@ const handler = async (
           .mutation({
             createCallLog: { __args: { data }, id: true },
           })
-          .then(() => ({ linked: personId !== null }));
+          .then((res) => ({
+            linked: personId !== null,
+            id: (res as { createCallLog?: { id?: string } }).createCallLog?.id ?? null,
+            row,
+          }));
       }),
     );
     for (const r of results) {
       if (r.status === 'fulfilled') {
         created++;
-        if ((r.value as { linked: boolean }).linked) linked++;
+        const value = r.value as {
+          linked: boolean;
+          id: string | null;
+          row: typeof toCreate[number];
+        };
+        if (value.linked) linked++;
+        if (value.id) {
+          createdForEnrichment.push({
+            id: value.id,
+            pbxCallId: value.row.pbxCallId,
+            callId: value.row.callId,
+            duration: value.row.duration,
+            hasRecording: false,
+            hasTranscript: false,
+          });
+        }
       } else if (isUniqueConstraintError(r.reason)) {
         dupRace++;
       } else {
@@ -399,6 +433,26 @@ const handler = async (
     }
     console.log(
       `[sync-zadarma-calls] batch ${Math.floor(i / MUTATION_BATCH) + 1} created=${created} dupRace=${dupRace} failed=${failed} linked=${linked}`,
+    );
+  }
+
+  // Enrichment: fetch recording link + transcript for newly-created rows that
+  // are long enough to be worth processing. Bounded by ENRICHMENT_BUDGET_MS so
+  // we never blow the sync timeout. Anything left over surfaces via
+  // enrichment.budgetExceeded and the user finishes it from the
+  // "Enrich missing recordings" button in Settings.
+  let enrichment: EnrichResult | undefined;
+  if (createdForEnrichment.length > 0) {
+    console.log(
+      `[sync-zadarma-calls] enrichment starting for ${createdForEnrichment.length} new rows (budget ${ENRICHMENT_BUDGET_MS}ms)`,
+    );
+    enrichment = await enrichCallLogs(client, createdForEnrichment, {
+      userKey,
+      secret,
+      maxBudgetMs: ENRICHMENT_BUDGET_MS,
+    });
+    console.log(
+      `[sync-zadarma-calls] enrichment done processed=${enrichment.processed}/${createdForEnrichment.length} rec=${enrichment.enrichedRecording} tr=${enrichment.enrichedTranscript} skippedShort=${enrichment.skippedShort} skippedNoCallId=${enrichment.skippedNoCallId} budgetExceeded=${enrichment.budgetExceeded}`,
     );
   }
 
@@ -421,6 +475,7 @@ const handler = async (
     linked,
     failed,
     elapsedMs,
+    ...(enrichment ? { enrichment } : {}),
   };
 };
 
