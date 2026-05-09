@@ -111,10 +111,32 @@ const ZadarmaSettings = () => {
   const [syncToLocal, setSyncToLocal] = useState('');
   const [syncing, setSyncing] = useState(false);
   const [syncResult, setSyncResult] = useState<string | null>(null);
+  const [syncStartedAt, setSyncStartedAt] = useState<number | null>(null);
 
   // Enrich existing callLogs with recordings + transcripts (back-fill).
   const [enriching, setEnriching] = useState(false);
   const [enrichResult, setEnrichResult] = useState<string | null>(null);
+  const [enrichStartedAt, setEnrichStartedAt] = useState<number | null>(null);
+
+  // Tick state forces a re-render every second while a long-running button
+  // is in flight, so the label can show elapsed seconds. Without this the UI
+  // looks frozen for ~minutes on long syncs / back-fills, and the user can't
+  // tell whether the call is alive or hung.
+  const [, setElapsedTick] = useState(0);
+  useEffect(() => {
+    if (!syncing && !enriching) return;
+    const id = setInterval(() => setElapsedTick((t) => t + 1), 1000);
+    return () => clearInterval(id);
+  }, [syncing, enriching]);
+
+  const elapsedLabel = (startedAt: number | null): string => {
+    if (startedAt === null) return '';
+    const seconds = Math.floor((Date.now() - startedAt) / 1000);
+    if (seconds < 60) return `${seconds}s`;
+    const m = Math.floor(seconds / 60);
+    const s = seconds % 60;
+    return `${m}m ${s}s`;
+  };
 
   // datetime-local values are interpreted in the browser's local timezone, then
   // converted to UTC ISO. For users whose browser TZ matches the cabinet TZ
@@ -259,6 +281,7 @@ const ZadarmaSettings = () => {
     if (!apiBaseUrl || !accessToken || syncing) return;
     if (customRangeInvalid) return;
     setSyncing(true);
+    setSyncStartedAt(Date.now());
     setSyncResult(null);
     try {
       const body: { fromIso?: string; toIso?: string } = {};
@@ -299,12 +322,14 @@ const ZadarmaSettings = () => {
       setSyncResult(e instanceof Error ? e.message : String(e));
     } finally {
       setSyncing(false);
+      setSyncStartedAt(null);
     }
   };
 
   const runEnrich = async () => {
     if (!apiBaseUrl || !accessToken || enriching) return;
     setEnriching(true);
+    setEnrichStartedAt(Date.now());
     setEnrichResult(null);
     try {
       const r = await fetch(`${apiBaseUrl}/s/zadarma/enrich-call-logs`, {
@@ -360,6 +385,7 @@ const ZadarmaSettings = () => {
       setEnrichResult(e instanceof Error ? e.message : String(e));
     } finally {
       setEnriching(false);
+      setEnrichStartedAt(null);
     }
   };
 
@@ -1121,7 +1147,7 @@ const ZadarmaSettings = () => {
             onClick={() => runSync()}
             disabled={syncing || customRangeInvalid}
           >
-            {syncing ? 'Syncing…' : 'Sync calls'}
+            {syncing ? `Syncing… (${elapsedLabel(syncStartedAt)})` : 'Sync calls'}
           </button>
           {syncResult && (
             <span style={{ fontSize: 12, color: 'var(--t-font-color-secondary)' }}>
@@ -1152,7 +1178,7 @@ const ZadarmaSettings = () => {
             onClick={() => runEnrich()}
             disabled={enriching}
           >
-            {enriching ? 'Enriching…' : 'Enrich missing'}
+            {enriching ? `Enriching… (${elapsedLabel(enrichStartedAt)})` : 'Enrich missing'}
           </button>
           {enrichResult && (
             <span style={{ fontSize: 12, color: 'var(--t-font-color-secondary)' }}>
