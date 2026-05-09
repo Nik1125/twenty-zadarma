@@ -3,7 +3,10 @@ import {
   defineFrontComponent,
   STANDARD_OBJECT_UNIVERSAL_IDENTIFIERS,
 } from 'twenty-sdk/define';
-import { useFrontComponentExecutionContext } from 'twenty-sdk/front-component';
+import {
+  navigate,
+  useFrontComponentExecutionContext,
+} from 'twenty-sdk/front-component';
 
 // SDK 2.3.0 ships useRecordId() that blindly reads ctx.selectedRecordIds.length,
 // but Twenty server <=2.2.x sends contexts that contain only the deprecated
@@ -38,6 +41,8 @@ type CallLogNode = {
   disposition: string | null;
   ourNumber: string | null;
   internalExtension: string | null;
+  callerType: 'HUMAN' | 'AI' | 'UNKNOWN' | null;
+  aiAgentName: string | null;
 };
 
 type SmsLogNode = {
@@ -93,6 +98,37 @@ const dispositionColor = (d: string | null): string => {
     default: return 'var(--t-color-gray)';
   }
 };
+
+const dispositionLabel = (d: string | null): string => {
+  switch (d) {
+    case 'ANSWERED': return '✅ ANSWERED';
+    case 'NO_ANSWER': return '🚫 NO_ANSWER';
+    case 'BUSY': return '⏱ BUSY';
+    case 'CANCEL': return '◯ CANCEL';
+    case 'CALL_FAILED': return '⚠ CALL_FAILED';
+    default: return 'unknown';
+  }
+};
+
+const callerTypePill = (
+  t: 'HUMAN' | 'AI' | 'UNKNOWN' | null,
+): { label: string; color: string } | null => {
+  if (t === 'AI') return { label: '🤖 AI', color: 'var(--t-color-purple)' };
+  if (t === 'HUMAN') return { label: '👤 HUMAN', color: 'var(--t-color-gray)' };
+  return null;
+};
+
+const pillStyle = (color: string): CSSProperties => ({
+  display: 'inline-flex',
+  alignItems: 'center',
+  padding: '1px 6px',
+  borderRadius: 4,
+  fontSize: 11,
+  fontWeight: 500,
+  border: `1px solid ${color}`,
+  color,
+  whiteSpace: 'nowrap',
+});
 
 const ZadarmaPersonPanel = () => {
   const personId = useRecordIdCompat();
@@ -198,6 +234,8 @@ const ZadarmaPersonPanel = () => {
               disposition: true,
               ourNumber: true,
               internalExtension: true,
+              callerType: true,
+              aiAgentName: true,
             },
           },
         },
@@ -281,7 +319,9 @@ const ZadarmaPersonPanel = () => {
   };
   const callItem: CSSProperties = {
     padding: '10px 12px', background: 'var(--t-background-primary)', border: '1px solid var(--t-border-color-light)',
-    borderRadius: 6, fontSize: 13,
+    borderRadius: 6, fontSize: 13, width: '100%', textAlign: 'left', cursor: 'pointer',
+    fontFamily: 'inherit', color: 'var(--t-font-color-primary)',
+    display: 'flex', flexDirection: 'column', gap: 4,
   };
 
   const messagesArea: CSSProperties = {
@@ -318,25 +358,63 @@ const ZadarmaPersonPanel = () => {
         {callLogs.length === 0 ? (
           <div style={empty}>No calls linked to this person yet</div>
         ) : (
-          callLogs.map((c) => (
-            <div key={c.id} style={callItem}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <strong style={{ fontSize: 12 }}>
-                  {c.callType === 'IN' ? '📥 Inbound' : '📤 Outbound'}
-                </strong>
-                <span style={{ fontSize: 11, color: 'var(--t-font-color-secondary)' }}>{formatDateTime(c.callStart)}</span>
-              </div>
-              <div style={{ marginTop: 4, display: 'flex', gap: 8, alignItems: 'center', fontSize: 12 }}>
-                <span style={{ color: dispositionColor(c.disposition), fontWeight: 500 }}>
-                  {c.disposition?.toLowerCase().replace('_', ' ') ?? 'unknown'}
-                </span>
-                <span style={{ color: 'var(--t-font-color-secondary)' }}>· {formatDuration(c.duration)}</span>
-                {c.internalExtension && (
-                  <span style={{ color: 'var(--t-font-color-secondary)' }}>· ext {c.internalExtension}</span>
+          callLogs.map((c) => {
+            const caller = callerTypePill(c.callerType);
+            const showDuration = typeof c.duration === 'number' && c.duration > 0;
+            return (
+              <button
+                type="button"
+                key={c.id}
+                style={callItem}
+                onClick={() => navigate(`/object/callLog/${c.id}`)}
+              >
+                <div
+                  style={{
+                    display: 'flex',
+                    flexWrap: 'wrap',
+                    rowGap: 4,
+                    columnGap: 8,
+                    alignItems: 'center',
+                    fontSize: 12,
+                  }}
+                >
+                  <strong style={{ fontSize: 12 }}>
+                    {c.callType === 'IN' ? '📥 Inbound' : '📤 Outbound'}
+                  </strong>
+                  <span style={{ color: 'var(--t-font-color-secondary)' }}>
+                    · {formatDateTime(c.callStart)}
+                  </span>
+                  <span style={pillStyle(dispositionColor(c.disposition))}>
+                    {dispositionLabel(c.disposition)}
+                  </span>
+                  {showDuration && (
+                    <span style={{ color: 'var(--t-font-color-secondary)' }}>
+                      {formatDuration(c.duration)}
+                    </span>
+                  )}
+                  {caller && (
+                    <span style={pillStyle(caller.color)}>{caller.label}</span>
+                  )}
+                  {c.internalExtension && (
+                    <span style={{ color: 'var(--t-font-color-secondary)' }}>
+                      ext {c.internalExtension}
+                    </span>
+                  )}
+                </div>
+                {c.aiAgentName && (
+                  <div
+                    style={{
+                      fontSize: 11,
+                      color: 'var(--t-font-color-secondary)',
+                      paddingLeft: 4,
+                    }}
+                  >
+                    {c.aiAgentName}
+                  </div>
                 )}
-              </div>
-            </div>
-          ))
+              </button>
+            );
+          })
         )}
       </div>
     </>
