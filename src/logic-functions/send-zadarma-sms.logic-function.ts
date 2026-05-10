@@ -9,6 +9,7 @@ import {
   isOptedOutOfSms,
 } from 'src/modules/zadarma/utils/is-opted-out-of-sms';
 import { normalizePhone } from 'src/modules/zadarma/utils/normalize-phone';
+import { parseRetryAfter } from 'src/modules/zadarma/utils/parse-retry-after';
 import { parseSmsAnalyticsTags } from 'src/modules/zadarma/utils/parse-sms-analytics-tags';
 import { updateLastContactedIfNewer } from 'src/modules/zadarma/utils/update-last-contacted';
 
@@ -172,6 +173,26 @@ const innerHandler = async (
   });
   const responseText = await response.text();
   debug.push(`[zadarma] status=${response.status} body=${responseText.slice(0, 300)}`);
+
+  // Zadarma 100 SMS/min cap. Surface the Retry-After to the caller (n8n,
+  // Twenty Workflow, manual UI) so they know how long to back off. NOTE:
+  // we deliberately DO NOT create an smsLog row here — leaving the failure
+  // out of the log lets the caller retry cleanly without producing an
+  // orphan FAILED row that would muddle dashboards.
+  if (response.status === 429) {
+    const retryAfterSeconds = parseRetryAfter(response.headers.get('retry-after'));
+    console.warn(
+      `[send-zadarma-sms] RATE_LIMITED number=${number} retryAfter=${retryAfterSeconds}s`,
+    );
+    return {
+      ok: false,
+      error: 'rate_limited',
+      retryAfterSeconds,
+      personId,
+      debug,
+    };
+  }
+
   let data: ZadarmaSmsSendResponse;
   try {
     data = JSON.parse(responseText) as ZadarmaSmsSendResponse;

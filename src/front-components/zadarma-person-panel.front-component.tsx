@@ -147,8 +147,10 @@ const ZadarmaPersonPanel = () => {
     return apiBaseUrl ? `${apiBaseUrl}/s/zadarma/send-sms` : null;
   }, []);
 
-  // Pull the user's configured DEFAULT_SENDER_DID once on mount so we can use
-  // it as a fallback when this Person has no prior call/SMS history yet.
+  // Pull the user's configured DIDs once on mount so we can use them as a
+  // fallback when this Person has no prior call/SMS history yet. Reads
+  // OUR_NUMBERS first (multi-DID workspaces) and falls back to the legacy
+  // DEFAULT_SENDER_DID. Picks the first entry as the default sender.
   useEffect(() => {
     const fetchDefaults = async () => {
       const apiBaseUrl = (process.env.TWENTY_API_URL ?? '').replace(/\/$/, '');
@@ -169,6 +171,16 @@ const ZadarmaPersonPanel = () => {
           data?: { findOneApplication?: { applicationVariables?: Array<{ key?: string; value?: string }> } };
         };
         const vars = json.data?.findOneApplication?.applicationVariables ?? [];
+        const ourNumbersRaw =
+          vars.find((v) => v.key === 'OUR_NUMBERS')?.value ?? '';
+        const firstOurNumber = ourNumbersRaw
+          .split(',')
+          .map((s) => s.replace(/\D+/g, ''))
+          .find((d) => d.length >= 6);
+        if (firstOurNumber) {
+          setDefaultSenderDid(firstOurNumber);
+          return;
+        }
         const did = vars.find((v) => v.key === 'DEFAULT_SENDER_DID')?.value ?? '';
         setDefaultSenderDid(did.replace(/\D+/g, ''));
       } catch {

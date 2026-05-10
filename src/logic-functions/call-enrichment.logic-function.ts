@@ -3,6 +3,7 @@ import { type RoutePayload } from 'twenty-sdk/logic-function';
 import { CoreApiClient } from 'twenty-client-sdk/core';
 
 import { CALL_ENRICHMENT_LOGIC_FUNCTION_UNIVERSAL_IDENTIFIER } from 'src/constants/universal-identifiers';
+import { formatMarkdownToBlocknote } from 'src/modules/shared/format-markdown-blocknote';
 import { parseAiExtensions } from 'src/modules/zadarma/utils/parse-ai-extensions';
 import { resolveEnrichmentWindowSeconds } from 'src/modules/zadarma/utils/parse-enrichment-window';
 import { resolveCallLogMatch } from 'src/modules/zadarma/utils/resolve-call-log-match';
@@ -191,12 +192,16 @@ const handler = async (
   // `match.correlationId` if provided (so adapters can pass it once).
   const correlationId = data.correlationId ?? match.correlationId;
   if (correlationId) updateData.correlationId = correlationId;
-  // RICH_TEXT v2 fields expect { markdown: string } shape; wrap plain strings.
+  // RICH_TEXT v2 fields take both `{ markdown, blocknote }`. Markdown alone
+  // renders as raw plaintext (visible `**` / `##`) until the operator
+  // manually edits the field — BlockNote only parses on input events. Wrap
+  // every string write through formatMarkdownToBlocknote so external
+  // adapters (n8n) don't have to know about this gotcha.
   if (typeof data.aiTranscript === 'string') {
-    updateData.aiTranscript = { markdown: data.aiTranscript };
+    updateData.aiTranscript = formatMarkdownToBlocknote(data.aiTranscript);
   }
   if (typeof data.aiSummary === 'string') {
-    updateData.summary = { markdown: data.aiSummary };
+    updateData.summary = formatMarkdownToBlocknote(data.aiSummary);
   }
   if (typeof data.recordingUrl === 'string' && data.recordingUrl.length > 0) {
     updateData.recording = {

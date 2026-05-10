@@ -55,10 +55,22 @@ Webhook (POST /refresh-bio)
   └─ HTTP: GET Twenty - the specific callLog (for aiTranscript + summary)
   └─ (optional) HTTP: GET Twenty - last 2-3 calls + last 3 SMS for richer context
   └─ LLM (your prompt): "Update biography with new context" → markdown output
-  └─ HTTP: PATCH Twenty - updateOnePerson { aiBiography: { markdown: <output> } }
+  └─ Function: convert markdown → { markdown, blocknote } via the helper in
+                docs/SNIPPETS.md (mandatory — markdown alone renders raw
+                `**` until the operator manually edits the field).
+  └─ HTTP: PATCH Twenty - updateOnePerson { aiBiography: { markdown, blocknote } }
   └─ Catch error branch:
-       └─ HTTP: PATCH updateOnePerson { aiBiography: { markdown: <oldBio> + "\n\n---\n_⚠ Last refresh failed at <ts>_" } }
+       └─ markdown = <oldBio> + "\n\n---\n_⚠ Last refresh failed at <ts>_"
+       └─ Function: convert markdown → { markdown, blocknote }
+       └─ HTTP: PATCH updateOnePerson { aiBiography: { markdown, blocknote } }
 ```
+
+> **RICH_TEXT v2 contract** — both `markdown` AND `blocknote` (JSON-stringified
+> BlockNote document) must be sent on every write. The BlockNote editor
+> renders from the `blocknote` field on read; markdown alone is treated as
+> raw text and shows literal `**` / `##` / `-` characters until a human
+> edits the field. See [docs/SNIPPETS.md](./SNIPPETS.md) for a copy-pasteable
+> n8n Function node.
 
 Debounce inside the n8n flow:
 

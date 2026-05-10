@@ -7,6 +7,7 @@ import { CoreApiClient } from 'twenty-client-sdk/core';
 
 import { signZadarmaRequest } from 'src/modules/zadarma/connector/sign-request';
 import { normalizePhone } from 'src/modules/zadarma/utils/normalize-phone';
+import { parseRetryAfter } from 'src/modules/zadarma/utils/parse-retry-after';
 import { updateLastContactedIfNewer } from 'src/modules/zadarma/utils/update-last-contacted';
 
 // Trigger: when a manager creates an outbound smsLog through Twenty's standard
@@ -105,6 +106,37 @@ const handler = async (
     headers: signed.headers,
     body: signed.body,
   });
+
+  // Zadarma 100 SMS/min cap. The smsLog row is already created (this trigger
+  // fired off the standard UI's "+ New SMS log" form), so we cannot avoid it.
+  // Mark it FAILED with a retry hint so the operator knows to wait and create
+  // a fresh row (or rely on the caller's retry policy if going through the
+  // /zadarma/send-sms endpoint which short-circuits before creating a row).
+  if (response.status === 429) {
+    const retryAfterSeconds = parseRetryAfter(response.headers.get('retry-after'));
+    console.warn(
+      `[send-sms-on-smslog-created] RATE_LIMITED smsLog=${smsLogId} retryAfter=${retryAfterSeconds}s`,
+    );
+    await client.mutation({
+      updateSmsLog: {
+        __args: {
+          id: smsLogId,
+          data: {
+            status: 'FAILED',
+            errorMessage: `Rate limited by Zadarma. Retry after ${retryAfterSeconds}s.`,
+          },
+        },
+        id: true,
+      },
+    });
+    return {
+      ok: false,
+      smsLogId,
+      error: 'rate_limited',
+      retryAfterSeconds,
+    };
+  }
+
   const data = (await response.json()) as ZadarmaSmsSendResponse;
   const isSuccess = data.status === 'success';
 
