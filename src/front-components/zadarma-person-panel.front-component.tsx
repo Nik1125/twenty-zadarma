@@ -147,10 +147,9 @@ const ZadarmaPersonPanel = () => {
     return apiBaseUrl ? `${apiBaseUrl}/s/zadarma/send-sms` : null;
   }, []);
 
-  // Pull the user's configured DIDs once on mount so we can use them as a
-  // fallback when this Person has no prior call/SMS history yet. Reads
-  // OUR_NUMBERS first (multi-DID workspaces) and falls back to the legacy
-  // DEFAULT_SENDER_DID. Picks the first entry as the default sender.
+  // Pull the workspace's ZADARMA_DIDS once on mount and pick the first
+  // entry (= the default DID) as the fallback sender when this Person has
+  // no prior call/SMS history yet.
   useEffect(() => {
     const fetchDefaults = async () => {
       const apiBaseUrl = (process.env.TWENTY_API_URL ?? '').replace(/\/$/, '');
@@ -171,18 +170,13 @@ const ZadarmaPersonPanel = () => {
           data?: { findOneApplication?: { applicationVariables?: Array<{ key?: string; value?: string }> } };
         };
         const vars = json.data?.findOneApplication?.applicationVariables ?? [];
-        const ourNumbersRaw =
-          vars.find((v) => v.key === 'OUR_NUMBERS')?.value ?? '';
-        const firstOurNumber = ourNumbersRaw
+        const didsRaw =
+          vars.find((v) => v.key === 'ZADARMA_DIDS')?.value ?? '';
+        const firstDid = didsRaw
           .split(',')
           .map((s) => s.replace(/\D+/g, ''))
           .find((d) => d.length >= 6);
-        if (firstOurNumber) {
-          setDefaultSenderDid(firstOurNumber);
-          return;
-        }
-        const did = vars.find((v) => v.key === 'DEFAULT_SENDER_DID')?.value ?? '';
-        setDefaultSenderDid(did.replace(/\D+/g, ''));
+        setDefaultSenderDid(firstDid ?? '');
       } catch {
         // Non-fatal — chat just falls back to history-derived ourNumber.
       }
@@ -488,7 +482,7 @@ const ZadarmaPersonPanel = () => {
             }}>
               <span style={{ fontWeight: 600 }}>No sender number. </span>
               <span>
-                Set <code>DEFAULT_SENDER_DID</code> in Settings → Applications → Zadarma, or pick the DID dropdown in the custom Zadarma Settings tab. Sending is disabled until a sender number is configured.
+                Set <code>ZADARMA_DIDS</code> in Settings → Zadarma → Behaviour by ticking at least one number. The first ticked entry is the default sender. Sending is disabled until a sender number is configured.
               </span>
             </div>
           ) : null}

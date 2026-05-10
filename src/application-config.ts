@@ -14,9 +14,8 @@ import {
   APPLICATION_UNIVERSAL_IDENTIFIER,
   CALL_ENRICHMENT_WINDOW_SECONDS_VARIABLE_UNIVERSAL_IDENTIFIER,
   DEFAULT_ROLE_UNIVERSAL_IDENTIFIER,
-  DEFAULT_SENDER_DID_VARIABLE_UNIVERSAL_IDENTIFIER,
-  OUR_NUMBERS_VARIABLE_UNIVERSAL_IDENTIFIER,
   ZADARMA_CABINET_TIMEZONE_VARIABLE_UNIVERSAL_IDENTIFIER,
+  ZADARMA_DIDS_VARIABLE_UNIVERSAL_IDENTIFIER,
   ZADARMA_RATE_CURRENCY_VARIABLE_UNIVERSAL_IDENTIFIER,
   ZADARMA_RATE_PER_MINUTE_VARIABLE_UNIVERSAL_IDENTIFIER,
   ZADARMA_SECRET_VARIABLE_UNIVERSAL_IDENTIFIER,
@@ -45,22 +44,17 @@ export default defineApplication({
         'Zadarma API secret (paired with the user key). Required.',
       isSecret: true,
     },
-    DEFAULT_SENDER_DID: {
-      universalIdentifier: DEFAULT_SENDER_DID_VARIABLE_UNIVERSAL_IDENTIFIER,
+    // Comma-separated list of E.164 numbers (without "+") that this
+    // workspace owns as outbound DIDs. **First entry is the default** —
+    // used as the stamp on outbound callLog rows when Zadarma's stats
+    // payload doesn't carry the actual leg DID, and as the default sender
+    // in the Person panel SMS form. Operators normally manage this through
+    // the Settings → Zadarma → Behaviour checkbox widget rather than
+    // editing the CSV by hand.
+    ZADARMA_DIDS: {
+      universalIdentifier: ZADARMA_DIDS_VARIABLE_UNIVERSAL_IDENTIFIER,
       description:
-        '[Manage in Custom tab] [Legacy — prefer OUR_NUMBERS] Default outbound DID. Format: E.164 without "+". Example: 48570000808. Used as the sole entry when OUR_NUMBERS is empty.',
-      value: '',
-    },
-    // Multi-DID workspaces: comma-separated list of E.164 numbers (without
-    // "+") that we recognise as "ours". The first entry is used as the
-    // default stamp on outbound callLog rows when Zadarma's stats payload
-    // doesn't carry the actual leg DID. Future enhancement: per-row
-    // classification using all entries (will require parser update).
-    // Falls back to DEFAULT_SENDER_DID when empty for back-compat.
-    OUR_NUMBERS: {
-      universalIdentifier: OUR_NUMBERS_VARIABLE_UNIVERSAL_IDENTIFIER,
-      description:
-        '[Manage in Custom tab] Comma-separated list of all outbound DIDs the workspace owns (E.164 without "+"). Example: "48570000808,380501234567". First entry is used as default stamp on outbound calls. Empty = falls back to DEFAULT_SENDER_DID.',
+        '[Manage in Custom tab] Comma-separated list of outbound DIDs this workspace owns (E.164 without "+"). First entry is the default. Example: "48570000808,380501234567".',
       value: '',
     },
     ZADARMA_TRANSCRIPT_ENABLED: {

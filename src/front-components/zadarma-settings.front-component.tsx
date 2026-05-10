@@ -76,8 +76,10 @@ const ZadarmaSettings = () => {
   const [enrichCheck, setEnrichCheck] = useState<WebhookCheck>({ status: 'idle' });
 
   const [appId, setAppId] = useState<string | null>(null);
-  const [defaultSenderDid, setDefaultSenderDid] = useState<string>('');
-  const [ourNumbers, setOurNumbers] = useState<string>('');
+  // CSV string of E.164-without-plus DIDs; first entry is the default.
+  // Operators normally toggle this through the checkbox widget below;
+  // the free-text fallback shows up only when info.numbers is empty.
+  const [zadarmaDids, setZadarmaDids] = useState<string>('');
   const [transcriptEnabled, setTranscriptEnabled] = useState<boolean>(true);
   const [cabinetTimezone, setCabinetTimezone] = useState<string>('');
   const [tzCustomMode, setTzCustomMode] = useState<boolean>(false);
@@ -208,8 +210,7 @@ const ZadarmaSettings = () => {
       const app = json.data?.findOneApplication;
       if (app?.id) setAppId(app.id);
       const vars = app?.applicationVariables ?? [];
-      const did = vars.find((v) => v.key === 'DEFAULT_SENDER_DID')?.value ?? '';
-      const ourNums = vars.find((v) => v.key === 'OUR_NUMBERS')?.value ?? '';
+      const dids = vars.find((v) => v.key === 'ZADARMA_DIDS')?.value ?? '';
       const tr = (vars.find((v) => v.key === 'ZADARMA_TRANSCRIPT_ENABLED')?.value ?? 'true').toLowerCase();
       const tz = vars.find((v) => v.key === 'ZADARMA_CABINET_TIMEZONE')?.value ?? '';
       const zRate = vars.find((v) => v.key === 'ZADARMA_RATE_PER_MINUTE')?.value ?? '';
@@ -218,8 +219,7 @@ const ZadarmaSettings = () => {
       const aCur = vars.find((v) => v.key === 'AI_RATE_CURRENCY')?.value ?? '';
       const tsUrl = vars.find((v) => v.key === 'TEAMSALE_BASE_URL')?.value ?? '';
       const acpRaw = (vars.find((v) => v.key === 'ZADARMA_AUTO_CREATE_PERSON')?.value ?? 'false').toLowerCase();
-      setDefaultSenderDid(did);
-      setOurNumbers(ourNums);
+      setZadarmaDids(dids);
       setTranscriptEnabled(tr !== 'false' && tr !== '0');
       setCabinetTimezone(tz);
       setZadarmaRatePerMinute(zRate);
@@ -828,54 +828,90 @@ const ZadarmaSettings = () => {
           Changes save immediately.
         </div>
 
-        <div style={row}>
-          <span style={labelCol}>Default sender DID</span>
-          {info?.numbers && info.numbers.length > 0 ? (
-            <select
-              value={defaultSenderDid}
-              onChange={(e: { detail?: { value?: string } }) => {
-                const next = e.detail?.value ?? '';
-                setDefaultSenderDid(next);
-                updateAppVar('DEFAULT_SENDER_DID', next);
-              }}
-              disabled={!appId || savingVar === 'DEFAULT_SENDER_DID'}
-              style={{ flex: 1, padding: '4px 8px', fontSize: 12, fontFamily: 'inherit' }}
-            >
-              <option value="">— pick a number —</option>
-              {info.numbers.map((n) => (
-                <option key={n.number} value={n.number ?? ''}>
-                  +{n.number} {n.description ? `· ${n.description}` : ''}
-                </option>
-              ))}
-            </select>
-          ) : (
-            <input
-              value={defaultSenderDid}
-              placeholder="48570000808"
-              onChange={(e: { detail?: { value?: string } }) => setDefaultSenderDid(e.detail?.value ?? '')}
-              onBlur={() => updateAppVar('DEFAULT_SENDER_DID', defaultSenderDid)}
-              disabled={!appId}
-              style={{ flex: 1, padding: '4px 8px', fontSize: 12, fontFamily: 'inherit' }}
-            />
-          )}
-          {savingVar === 'DEFAULT_SENDER_DID' && <span style={{ fontSize: 11, color: 'var(--t-font-color-secondary)' }}>saving…</span>}
-        </div>
-
-        <div style={row}>
-          <span style={labelCol}>All our DIDs (multi-DID)</span>
-          <input
-            value={ourNumbers}
-            placeholder="48570000808,380501234567"
-            onChange={(e: { detail?: { value?: string } }) => setOurNumbers(e.detail?.value ?? '')}
-            onBlur={() => updateAppVar('OUR_NUMBERS', ourNumbers)}
-            disabled={!appId}
-            style={{ flex: 1, padding: '4px 8px', fontSize: 12, fontFamily: 'inherit' }}
-          />
-          {savingVar === 'OUR_NUMBERS' && <span style={{ fontSize: 11, color: 'var(--t-font-color-secondary)' }}>saving…</span>}
-        </div>
-        <div style={{ ...sectionHelp, marginLeft: 200 }}>
-          Comma-separated list of every outbound DID this workspace owns (E.164 without &quot;+&quot;). First entry is used as the default stamp on outbound calls when sync can&apos;t determine which DID was used. Empty = falls back to &quot;Default sender DID&quot; above.
-        </div>
+        {(() => {
+          const didsList = zadarmaDids
+            .split(',')
+            .map((s) => s.replace(/\D+/g, ''))
+            .filter((d) => d.length >= 6);
+          const writeDids = (list: string[]) => {
+            const csv = list.join(',');
+            setZadarmaDids(csv);
+            updateAppVar('ZADARMA_DIDS', csv);
+          };
+          const toggleDid = (num: string) => {
+            if (didsList.includes(num)) {
+              writeDids(didsList.filter((d) => d !== num));
+            } else {
+              writeDids([...didsList, num]);
+            }
+          };
+          const setDefaultDid = (num: string) => {
+            // Bring num to first position; auto-include if not yet checked.
+            writeDids([num, ...didsList.filter((d) => d !== num)]);
+          };
+          const useCheckboxList =
+            info?.numbers !== undefined && info.numbers.length > 0;
+          return (
+            <>
+              <div style={row}>
+                <span style={labelCol}>Our outbound DIDs</span>
+                <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 4 }}>
+                  {useCheckboxList ? (
+                    info.numbers!.map((n) => {
+                      const num = (n.number ?? '').replace(/\D+/g, '');
+                      if (!num) return null;
+                      const included = didsList.includes(num);
+                      const isDefault = didsList[0] === num;
+                      return (
+                        <div key={num} style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12 }}>
+                          <input
+                            type="radio"
+                            name="zadarma-dids-default"
+                            checked={isDefault}
+                            onChange={() => setDefaultDid(num)}
+                            disabled={!appId}
+                            title="Mark as default sender"
+                          />
+                          <input
+                            type="checkbox"
+                            checked={included}
+                            onChange={() => toggleDid(num)}
+                            disabled={!appId}
+                          />
+                          <span>+{num}{n.description ? ` · ${n.description}` : ''}</span>
+                          {isDefault && included && (
+                            <span style={{ color: 'var(--t-color-blue)', fontSize: 10, fontWeight: 600 }}>
+                              ★ default
+                            </span>
+                          )}
+                        </div>
+                      );
+                    })
+                  ) : (
+                    <input
+                      value={zadarmaDids}
+                      placeholder="48570000808,380501234567"
+                      onChange={(e: { detail?: { value?: string } }) => setZadarmaDids(e.detail?.value ?? '')}
+                      onBlur={() => updateAppVar('ZADARMA_DIDS', zadarmaDids)}
+                      disabled={!appId}
+                      style={{ flex: 1, padding: '4px 8px', fontSize: 12, fontFamily: 'inherit' }}
+                    />
+                  )}
+                </div>
+                {savingVar === 'ZADARMA_DIDS' && (
+                  <span style={{ fontSize: 11, color: 'var(--t-font-color-secondary)' }}>saving…</span>
+                )}
+              </div>
+              <div style={{ ...sectionHelp, marginLeft: 200 }}>
+                {useCheckboxList ? (
+                  <>Tick numbers this workspace owns; the radio-star marks the default sender used to stamp outbound callLog rows and pre-fill the Person panel SMS form.</>
+                ) : (
+                  <>Comma-separated E.164 numbers without &quot;+&quot;. First entry = default sender. Configure ZADARMA_USER_KEY/SECRET to load your numbers as a checkbox list instead.</>
+                )}
+              </div>
+            </>
+          );
+        })()}
 
         <div style={row}>
           <span style={labelCol}>Save transcripts</span>
