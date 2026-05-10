@@ -1,7 +1,8 @@
-// Parses the OUR_NUMBERS applicationVariable (or the legacy DEFAULT_SENDER_DID)
-// into an ordered list of E.164-without-plus numbers used to identify "our"
-// outbound DIDs. Used at sync time to stamp the `ourNumber` field on outbound
-// callLog rows when Zadarma's stats payload doesn't carry the actual leg DID.
+// Parses the ZADARMA_DIDS applicationVariable into an ordered list of
+// E.164-without-plus numbers. The first entry is the **default** DID —
+// used as the stamp on outbound callLog rows when Zadarma's stats payload
+// doesn't carry the actual leg DID, and as the default sender in the
+// Person panel SMS form.
 //
 // Inputs that look like phone numbers are kept (digits only, length >= 6).
 // Anything else (separators, empty fragments, garbage) is silently dropped.
@@ -14,7 +15,9 @@
 //   'foo,bar,baz'                          → []
 const MIN_DIGITS = 6;
 
-export const parseOurNumbers = (csv: string | null | undefined): string[] => {
+export const parseZadarmaDids = (
+  csv: string | null | undefined,
+): string[] => {
   if (csv == null) return [];
   const trimmed = csv.trim();
   if (trimmed === '') return [];
@@ -28,17 +31,4 @@ export const parseOurNumbers = (csv: string | null | undefined): string[] => {
     out.push(digits);
   }
   return out;
-};
-
-// Resolve the active "our DIDs" list using OUR_NUMBERS first, then the legacy
-// single-value DEFAULT_SENDER_DID. Centralises the back-compat fallback so
-// every caller (sync, frontend, future per-row classifier) reads the same
-// resolved list.
-export const resolveOurNumbers = (env: {
-  OUR_NUMBERS?: string;
-  DEFAULT_SENDER_DID?: string;
-}): string[] => {
-  const fromList = parseOurNumbers(env.OUR_NUMBERS);
-  if (fromList.length > 0) return fromList;
-  return parseOurNumbers(env.DEFAULT_SENDER_DID);
 };

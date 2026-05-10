@@ -15,7 +15,7 @@ import {
   type EnrichResult,
 } from 'src/modules/zadarma/utils/enrich-call-logs';
 import { parseAiExtensions } from 'src/modules/zadarma/utils/parse-ai-extensions';
-import { resolveOurNumbers } from 'src/modules/zadarma/utils/parse-our-numbers';
+import { parseZadarmaDids } from 'src/modules/zadarma/utils/parse-zadarma-dids';
 import {
   groupAndNormalizeStats,
   type ZadarmaPbxStatRow,
@@ -270,14 +270,12 @@ const handler = async (
   const userKey = process.env.ZADARMA_USER_KEY;
   const secret = process.env.ZADARMA_SECRET;
   const cabinetTz = (process.env.ZADARMA_CABINET_TIMEZONE ?? '').trim();
-  // Multi-DID resolution: OUR_NUMBERS first (any number of comma-separated
-  // entries), legacy DEFAULT_SENDER_DID as fallback. First entry is used as
-  // the default stamp on outbound rows when Zadarma stats don't carry the
-  // actual leg DID — same behaviour as before for single-DID workspaces.
-  const ourNumbers = resolveOurNumbers({
-    OUR_NUMBERS: process.env.OUR_NUMBERS,
-    DEFAULT_SENDER_DID: process.env.DEFAULT_SENDER_DID,
-  });
+  // ZADARMA_DIDS is a comma-separated CSV of every DID this workspace
+  // owns; first entry = default. We use the default to stamp outbound
+  // callLog rows when Zadarma's stats payload doesn't carry the actual
+  // leg DID. Future per-row direction classification can read the full
+  // list.
+  const ourNumbers = parseZadarmaDids(process.env.ZADARMA_DIDS);
   const ourNumber = ourNumbers[0] ?? '';
   const rates = parseCostRatesFromEnv({
     ZADARMA_RATE_PER_MINUTE: process.env.ZADARMA_RATE_PER_MINUTE,
