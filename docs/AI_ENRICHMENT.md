@@ -25,6 +25,14 @@ creating a duplicate.
 > and the linked-Note pattern for vendor debug data has been retired —
 > everything that should be persisted lives on typed callLog fields.
 
+> **v0.22.0 RICH_TEXT v2** — the `/zadarma/call-enrichment` endpoint now
+> wraps `aiTranscript` and `aiSummary` strings through a markdown→BlockNote
+> converter server-side. Callers send plain markdown as a string (as shown
+> in this doc) and the App produces the `{ markdown, blocknote }` payload
+> Twenty needs for proper rendering on first read. **No client-side change
+> required.** External writers that go directly to Twenty (not through this
+> App's endpoints) must convert themselves — see [docs/SNIPPETS.md](./SNIPPETS.md).
+
 ## Architecture
 
 ```

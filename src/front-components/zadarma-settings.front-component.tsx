@@ -77,6 +77,7 @@ const ZadarmaSettings = () => {
 
   const [appId, setAppId] = useState<string | null>(null);
   const [defaultSenderDid, setDefaultSenderDid] = useState<string>('');
+  const [ourNumbers, setOurNumbers] = useState<string>('');
   const [transcriptEnabled, setTranscriptEnabled] = useState<boolean>(true);
   const [cabinetTimezone, setCabinetTimezone] = useState<string>('');
   const [tzCustomMode, setTzCustomMode] = useState<boolean>(false);
@@ -208,6 +209,7 @@ const ZadarmaSettings = () => {
       if (app?.id) setAppId(app.id);
       const vars = app?.applicationVariables ?? [];
       const did = vars.find((v) => v.key === 'DEFAULT_SENDER_DID')?.value ?? '';
+      const ourNums = vars.find((v) => v.key === 'OUR_NUMBERS')?.value ?? '';
       const tr = (vars.find((v) => v.key === 'ZADARMA_TRANSCRIPT_ENABLED')?.value ?? 'true').toLowerCase();
       const tz = vars.find((v) => v.key === 'ZADARMA_CABINET_TIMEZONE')?.value ?? '';
       const zRate = vars.find((v) => v.key === 'ZADARMA_RATE_PER_MINUTE')?.value ?? '';
@@ -217,6 +219,7 @@ const ZadarmaSettings = () => {
       const tsUrl = vars.find((v) => v.key === 'TEAMSALE_BASE_URL')?.value ?? '';
       const acpRaw = (vars.find((v) => v.key === 'ZADARMA_AUTO_CREATE_PERSON')?.value ?? 'false').toLowerCase();
       setDefaultSenderDid(did);
+      setOurNumbers(ourNums);
       setTranscriptEnabled(tr !== 'false' && tr !== '0');
       setCabinetTimezone(tz);
       setZadarmaRatePerMinute(zRate);
@@ -856,6 +859,22 @@ const ZadarmaSettings = () => {
             />
           )}
           {savingVar === 'DEFAULT_SENDER_DID' && <span style={{ fontSize: 11, color: 'var(--t-font-color-secondary)' }}>saving…</span>}
+        </div>
+
+        <div style={row}>
+          <span style={labelCol}>All our DIDs (multi-DID)</span>
+          <input
+            value={ourNumbers}
+            placeholder="48570000808,380501234567"
+            onChange={(e: { detail?: { value?: string } }) => setOurNumbers(e.detail?.value ?? '')}
+            onBlur={() => updateAppVar('OUR_NUMBERS', ourNumbers)}
+            disabled={!appId}
+            style={{ flex: 1, padding: '4px 8px', fontSize: 12, fontFamily: 'inherit' }}
+          />
+          {savingVar === 'OUR_NUMBERS' && <span style={{ fontSize: 11, color: 'var(--t-font-color-secondary)' }}>saving…</span>}
+        </div>
+        <div style={{ ...sectionHelp, marginLeft: 200 }}>
+          Comma-separated list of every outbound DID this workspace owns (E.164 without &quot;+&quot;). First entry is used as the default stamp on outbound calls when sync can&apos;t determine which DID was used. Empty = falls back to &quot;Default sender DID&quot; above.
         </div>
 
         <div style={row}>
