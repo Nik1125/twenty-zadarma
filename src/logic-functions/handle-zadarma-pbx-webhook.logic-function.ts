@@ -9,6 +9,7 @@ import {
 import { signZadarmaRequest } from 'src/modules/zadarma/connector/sign-request';
 import { resolveCooldownUntilIso } from 'src/modules/zadarma/utils/active-call-lock';
 import { deriveCallerType } from 'src/modules/zadarma/utils/derive-caller-type';
+import { findLatestOpportunityIdForPerson } from 'src/modules/zadarma/utils/find-latest-opportunity-id';
 import { findPersonIdByClientNumber } from 'src/modules/zadarma/utils/find-person-by-phone';
 import { localToUtcIso } from 'src/modules/zadarma/utils/local-to-utc-iso';
 import { normalizePhone } from 'src/modules/zadarma/utils/normalize-phone';
@@ -241,6 +242,11 @@ const handleNotifyEnd = async (body: ZadarmaPbxEvent & Record<string, unknown>) 
     return { ok: true, action: 'updated', callLogId: existingId, personId };
   }
 
+  // Auto-attach to the Person's most-recently-created opportunity (if any)
+  // so fresh calls land on the deal the operator is currently working.
+  // Null when the Person has no opportunities — the field stays empty.
+  const opportunityId = await findLatestOpportunityIdForPerson(client, personId);
+
   const created = (await client.mutation({
     createCallLog: {
       __args: {
@@ -256,6 +262,7 @@ const handleNotifyEnd = async (body: ZadarmaPbxEvent & Record<string, unknown>) 
           internalExtension: body.internal || null,
           callerType,
           personId,
+          ...(opportunityId ? { opportunityId } : {}),
         },
       },
       id: true,
@@ -264,9 +271,9 @@ const handleNotifyEnd = async (body: ZadarmaPbxEvent & Record<string, unknown>) 
   const callLogId = created.createCallLog?.id;
   await writePersonCooldown(client, personId);
   console.log(
-    `[zadarma-pbx-webhook] NOTIFY_END pbx=${pbxCallId} type=${callType} client=${clientNumber} dur=${duration} created=${callLogId} personId=${personId}`,
+    `[zadarma-pbx-webhook] NOTIFY_END pbx=${pbxCallId} type=${callType} client=${clientNumber} dur=${duration} created=${callLogId} personId=${personId} opportunityId=${opportunityId ?? '-'}`,
   );
-  return { ok: true, action: 'created', callLogId, personId, matched: personId !== null };
+  return { ok: true, action: 'created', callLogId, personId, opportunityId, matched: personId !== null };
 };
 
 // Active-call-lock publisher. Fires for NOTIFY_START (inbound), NOTIFY_OUT_START

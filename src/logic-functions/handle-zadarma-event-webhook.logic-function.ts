@@ -2,6 +2,7 @@ import { defineLogicFunction } from 'twenty-sdk/define';
 import { type RoutePayload } from 'twenty-sdk/logic-function';
 import { CoreApiClient } from 'twenty-client-sdk/core';
 
+import { findLatestOpportunityIdForPerson } from 'src/modules/zadarma/utils/find-latest-opportunity-id';
 import { findPersonIdByClientNumber } from 'src/modules/zadarma/utils/find-person-by-phone';
 import { formatTranscript } from 'src/modules/zadarma/utils/format-transcript-blocknote';
 import { normalizePhone } from 'src/modules/zadarma/utils/normalize-phone';
@@ -182,6 +183,9 @@ const handleInboundSms = async (
   if (clientNumber) {
     personId = await findPersonIdByClientNumber(client, clientNumber);
   }
+  // Auto-attach to the Person's most-recently-created opportunity (if any)
+  // so inbound SMS lands on the active deal alongside calls.
+  const opportunityId = await findLatestOpportunityIdForPerson(client, personId);
 
   const created = (await client.mutation({
     createSmsLog: {
@@ -196,6 +200,7 @@ const handleInboundSms = async (
           ourNumber,
           body: text,
           personId,
+          ...(opportunityId ? { opportunityId } : {}),
           // Tag inbound rows so analytics can split inbound/outbound by
           // source. category stays at its OTHER default — n8n LLM
           // classifier may PATCH it to a more specific value later.
@@ -208,9 +213,9 @@ const handleInboundSms = async (
 
   const smsLogId = created.createSmsLog?.id;
   console.log(
-    `[zadarma-event-webhook] SMS inbound messageId=${messageId} client=${clientNumber} created=${smsLogId} personId=${personId}`,
+    `[zadarma-event-webhook] SMS inbound messageId=${messageId} client=${clientNumber} created=${smsLogId} personId=${personId} opportunityId=${opportunityId ?? '-'}`,
   );
-  return { ok: true, action: 'created', smsLogId, personId };
+  return { ok: true, action: 'created', smsLogId, personId, opportunityId };
 };
 
 const handler = async (event: RoutePayload<ZadarmaEventPayload>) => {

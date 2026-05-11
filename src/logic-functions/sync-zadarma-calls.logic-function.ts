@@ -9,6 +9,7 @@ import {
   parseCostRatesFromEnv,
 } from 'src/modules/zadarma/utils/compute-call-cost-from-rate';
 import { deriveCallerType } from 'src/modules/zadarma/utils/derive-caller-type';
+import { findLatestOpportunityIdsForPersons } from 'src/modules/zadarma/utils/find-latest-opportunity-id';
 import {
   enrichCallLogs,
   type EnrichInput,
@@ -407,6 +408,18 @@ const handler = async (
   const personMap =
     toCreate.length > 0 ? await buildPersonsByPhoneSuffix(client) : new Map<string, string>();
 
+  // For each unique Person in this batch, resolve the id of the most-
+  // recently-created opportunity (or null). One query per Person, so the
+  // hot create-loop below stays N-call free.
+  const personIdsInBatch = Array.from(
+    new Set(
+      toCreate
+        .map((r) => personMap.get(phoneKey(r.clientNumber) ?? ''))
+        .filter((p): p is string => typeof p === 'string'),
+    ),
+  );
+  const oppMap = await findLatestOpportunityIdsForPersons(client, personIdsInBatch);
+
   let created = 0;
   let failed = 0;
   let dupRace = 0;
@@ -430,6 +443,7 @@ const handler = async (
           },
           rates,
         );
+        const opportunityId = personId ? oppMap.get(personId) ?? null : null;
         const data: Record<string, unknown> = {
           name: row.name,
           pbxCallId: row.pbxCallId,
@@ -444,6 +458,7 @@ const handler = async (
           callerType,
           ...(cost ? { cost } : {}),
           ...(personId ? { personId } : {}),
+          ...(opportunityId ? { opportunityId } : {}),
         };
         return client
           .mutation({

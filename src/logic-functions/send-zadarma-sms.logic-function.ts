@@ -3,6 +3,7 @@ import { type RoutePayload } from 'twenty-sdk/logic-function';
 import { CoreApiClient } from 'twenty-client-sdk/core';
 
 import { signZadarmaRequest } from 'src/modules/zadarma/connector/sign-request';
+import { findLatestOpportunityIdForPerson } from 'src/modules/zadarma/utils/find-latest-opportunity-id';
 import { findPersonIdByClientNumber } from 'src/modules/zadarma/utils/find-person-by-phone';
 import {
   formatOptOutMessage,
@@ -217,6 +218,11 @@ const innerHandler = async (
     `[tags] category=${tags.category} source=${tags.source} template=${tags.templateName ?? '-'} campaign=${tags.campaignId ?? '-'}`,
   );
 
+  // Auto-attach to the Person's most-recently-created opportunity (if
+  // any) so the SMS lands on the deal the operator is currently
+  // working — same pattern callLog uses.
+  const opportunityId = await findLatestOpportunityIdForPerson(client, personId);
+
   const created = (await client.mutation({
     createSmsLog: {
       __args: {
@@ -243,6 +249,7 @@ const innerHandler = async (
               }
             : {}),
           personId,
+          ...(opportunityId ? { opportunityId } : {}),
         },
       },
       id: true,
