@@ -22,27 +22,35 @@ import {
 //   { limit?: number }   default 250; max 500.
 //   { onlyMissing?: boolean } default true. When true, the candidate scan
 //                             pre-filters by `cost.amountMicros IS NULL`.
-//                             This is what the operator wants 99% of the
-//                             time — fill in the rows that have no cost
-//                             yet. It also dodges Twenty's deep-pagination
-//                             scan cap that otherwise leaves older rows
-//                             with cost=NULL because the per-call scan
-//                             ran out of `endCursor` before reaching them.
 //                             Set to false to refresh ALL outbound rows
-//                             (e.g. after a rate change), at the cost of
-//                             being subject to the pagination cap.
+//                             (e.g. after a rate change).
+//   { fromIso?, toIso? }  optional callStart bounds. When the workspace has
+//                         >~2k missing-cost rows the unfiltered scan hits
+//                         Twenty's deep-pagination cap before reaching the
+//                         oldest rows — the UI splits the universe into
+//                         month-sized chunks and passes the bounds here so
+//                         each chunk resets cursor pagination from scratch.
+//                         Range filter is built as
+//                         `and: [{ callStart: { gte } }, { callStart: { lte } }]`
+//                         because Twenty rejects multi-operator-per-field
+//                         (`{ callStart: { gte, lte } }` returns 500).
 //
 // Strategy: page newest-first through OUT callLogs (optionally filtered to
-// `cost IS NULL`), batch updateCallLog 10-at-a-time, return counters +
-// remaining-page hint so the UI can show "click again to continue" until
-// the message reads "Nothing to update".
+// `cost IS NULL` and bounded to a callStart range), batch updateCallLog
+// 10-at-a-time, return counters + remaining-page hint so the UI can show
+// "click again to continue" until the message reads "Nothing to update".
 
 const DEFAULT_LIMIT = 250;
 const MAX_LIMIT = 500;
 const PAGE_SIZE = 200;
 const MUTATION_BATCH = 10;
 
-type RecomputeBody = { limit?: number; onlyMissing?: boolean };
+type RecomputeBody = {
+  limit?: number;
+  onlyMissing?: boolean;
+  fromIso?: string;
+  toIso?: string;
+};
 
 type CallLogRow = {
   id: string;
@@ -91,6 +99,8 @@ const handler = async (
   // time) drains every row that has no cost. Cursor pagination in Twenty
   // caps scan depth, so the no-filter path can leave older nulls behind.
   const onlyMissing = event.body?.onlyMissing !== false;
+  const fromIso = typeof event.body?.fromIso === 'string' ? event.body.fromIso : undefined;
+  const toIso = typeof event.body?.toIso === 'string' ? event.body.toIso : undefined;
 
   const client = new CoreApiClient();
 
@@ -105,15 +115,28 @@ const handler = async (
   // until we hit `limit`, since rate changes typically affect every row
   // and the picker fills on the first page anyway.
   while (candidates.length < limit && hasNextPageInScan) {
+    // Build filter — date bounds (when present) live in an `and:` array
+    // because Twenty rejects multiple operators on the same field in one
+    // object (`{ callStart: { gte, lte } }` returns 500).
+    const baseFilter: Record<string, unknown> = { callType: { eq: 'OUT' } };
+    if (onlyMissing) {
+      baseFilter.cost = { amountMicros: { is: 'NULL' } };
+    }
+    const filter =
+      fromIso || toIso
+        ? {
+            ...baseFilter,
+            and: [
+              ...(fromIso ? [{ callStart: { gte: fromIso } }] : []),
+              ...(toIso ? [{ callStart: { lte: toIso } }] : []),
+            ],
+          }
+        : baseFilter;
+
     const res = (await client.query({
       callLogs: {
         __args: {
-          filter: onlyMissing
-            ? {
-                callType: { eq: 'OUT' },
-                cost: { amountMicros: { is: 'NULL' } },
-              }
-            : { callType: { eq: 'OUT' } },
+          filter,
           orderBy: [{ callStart: 'DescNullsLast' }],
           first: PAGE_SIZE,
           ...(after ? { after } : {}),
@@ -205,7 +228,7 @@ const handler = async (
 
   const elapsedMs = Date.now() - startedAt;
   console.log(
-    `[recompute-costs] DONE onlyMissing=${onlyMissing} ratesConfigured=${ratesConfigured} scanned=${scanned} picked=${candidates.length} updated=${updated} cleared=${cleared} unchanged=${unchanged} failed=${failed} hasMore=${hasNextPageInScan} elapsed=${elapsedMs}ms`,
+    `[recompute-costs] DONE onlyMissing=${onlyMissing} from=${fromIso ?? '-'} to=${toIso ?? '-'} ratesConfigured=${ratesConfigured} scanned=${scanned} picked=${candidates.length} updated=${updated} cleared=${cleared} unchanged=${unchanged} failed=${failed} hasMore=${hasNextPageInScan} elapsed=${elapsedMs}ms`,
   );
 
   return {
@@ -225,7 +248,7 @@ export default defineLogicFunction({
   universalIdentifier: RECOMPUTE_COSTS_LOGIC_FUNCTION_UNIVERSAL_IDENTIFIER,
   name: 'recompute-costs',
   description:
-    'Recomputes callLog.cost for outbound rows using ZADARMA_RATE_PER_MINUTE / AI_RATE_PER_MINUTE × duration. Default body `{ onlyMissing: true }` pre-filters cost IS NULL so the operator-flow drains every legacy row efficiently (Twenty cursor pagination otherwise caps scan depth and leaves older nulls behind). Set `onlyMissing: false` to refresh every outbound row, e.g. after a rate change. Calls shorter than MIN_CHARGEABLE_DURATION_SECONDS (default 15) get cost=null. Inbound rows are always null.',
+    'Recomputes callLog.cost for outbound rows using ZADARMA_RATE_PER_MINUTE / AI_RATE_PER_MINUTE × duration. Default body `{ onlyMissing: true }` pre-filters cost IS NULL. Optional `{ fromIso, toIso }` bounds callStart so the UI can chunk by month and dodge Twenty\'s deep-pagination cap on workspaces with thousands of legacy rows. Set `onlyMissing: false` to refresh every outbound row (e.g. after a rate change). Calls shorter than MIN_CHARGEABLE_DURATION_SECONDS (default 15) get cost=null. Inbound rows are always null.',
   timeoutSeconds: 300,
   handler,
   httpRouteTriggerSettings: {

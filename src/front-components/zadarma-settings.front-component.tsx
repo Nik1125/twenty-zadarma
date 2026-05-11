@@ -430,47 +430,80 @@ const ZadarmaSettings = () => {
     setRecomputeCostsStartedAt(Date.now());
     setRecomputeCostsResult(null);
     try {
-      // Drain pages until hasMore=false, so the user gets a single
-      // "everything is up to date" terminal message even on workspaces
-      // with thousands of callLogs. The endpoint's per-call limit
-      // (default 250, max 500) protects the logic-function timeout;
-      // we just iterate.
+      // Chunk the universe of outbound rows into 30-day windows newest-first
+      // and drain each window until hasMore=false before moving on. Twenty's
+      // cursor pagination caps total scan depth somewhere around the low-
+      // thousands of rows per single call sequence even with a cost-IS-NULL
+      // filter, so without windowing a workspace with multi-thousand legacy
+      // rows simply can't drain past the cap. The endpoint accepts
+      // `{ fromIso, toIso }`; each window resets the scan from scratch.
+      //
+      // Termination: stop after `MAX_EMPTY_WINDOWS_IN_A_ROW` consecutive
+      // windows return updated+cleared = 0. That covers the gap between
+      // workspaces (some old, some young) and the case where ALL outbound
+      // rows are already correct.
+      const WINDOW_DAYS = 30;
+      const MAX_WINDOWS = 120; // ~10 years; safety stop.
+      const MAX_EMPTY_WINDOWS_IN_A_ROW = 3;
+
       let totalUpdated = 0;
       let totalCleared = 0;
       let totalUnchanged = 0;
       let totalScanned = 0;
       let totalFailed = 0;
-      for (;;) {
-        const r = await fetch(`${apiBaseUrl}/s/zadarma/recompute-costs`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Bearer ${accessToken}`,
-          },
-          body: JSON.stringify({}),
-        });
-        const json = (await r.json()) as {
-          ok?: boolean;
-          error?: string;
-          scanned?: number;
-          picked?: number;
-          updated?: number;
-          unchanged?: number;
-          cleared?: number;
-          failed?: number;
-          hasMore?: boolean;
-        };
-        if (!json.ok) {
-          setRecomputeCostsResult(`Recompute failed: ${json.error ?? 'unknown error'}`);
-          return;
+      let emptyStreak = 0;
+
+      const now = new Date();
+      for (let w = 0; w < MAX_WINDOWS; w++) {
+        const to = new Date(now.getTime() - w * WINDOW_DAYS * 86_400_000);
+        const from = new Date(to.getTime() - WINDOW_DAYS * 86_400_000);
+        const toIso = to.toISOString();
+        const fromIso = from.toISOString();
+
+        let windowUpdated = 0;
+        let windowCleared = 0;
+        // Inner loop drains this window via repeated calls.
+        for (;;) {
+          const r = await fetch(`${apiBaseUrl}/s/zadarma/recompute-costs`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              Authorization: `Bearer ${accessToken}`,
+            },
+            body: JSON.stringify({ fromIso, toIso }),
+          });
+          const json = (await r.json()) as {
+            ok?: boolean;
+            error?: string;
+            scanned?: number;
+            updated?: number;
+            unchanged?: number;
+            cleared?: number;
+            failed?: number;
+            hasMore?: boolean;
+          };
+          if (!json.ok) {
+            setRecomputeCostsResult(`Recompute failed: ${json.error ?? 'unknown error'}`);
+            return;
+          }
+          windowUpdated += json.updated ?? 0;
+          windowCleared += json.cleared ?? 0;
+          totalUpdated += json.updated ?? 0;
+          totalCleared += json.cleared ?? 0;
+          totalUnchanged += json.unchanged ?? 0;
+          totalScanned += json.scanned ?? 0;
+          totalFailed += json.failed ?? 0;
+          if (!json.hasMore) break;
         }
-        totalUpdated += json.updated ?? 0;
-        totalCleared += json.cleared ?? 0;
-        totalUnchanged += json.unchanged ?? 0;
-        totalScanned += json.scanned ?? 0;
-        totalFailed += json.failed ?? 0;
-        if (!json.hasMore) break;
+
+        if (windowUpdated === 0 && windowCleared === 0) {
+          emptyStreak += 1;
+          if (emptyStreak >= MAX_EMPTY_WINDOWS_IN_A_ROW) break;
+        } else {
+          emptyStreak = 0;
+        }
       }
+
       if (totalUpdated === 0 && totalCleared === 0) {
         setRecomputeCostsResult(
           `Nothing to update — every outbound callLog already matches the configured rates (scanned ${totalScanned}, unchanged ${totalUnchanged}).`,
