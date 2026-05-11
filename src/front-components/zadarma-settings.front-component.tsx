@@ -726,7 +726,17 @@ const ZadarmaSettings = () => {
       : variant === 'primary'
         ? 'var(--t-color-blue)'
         : 'var(--t-background-primary)',
-    color: variant === 'primary' ? 'var(--t-font-color-inverted)' : 'var(--t-font-color-primary)',
+    // When disabled, always use the theme-primary font colour. The previous
+    // `inverted` colour (light text, designed for the blue primary fill)
+    // becomes light-on-light on the muted tertiary background in light
+    // theme, and the dark ghost colour becomes dark-on-dark in dark theme —
+    // either way the label disappears. `--t-font-color-primary` flips with
+    // theme and stays readable against `--t-background-tertiary`.
+    color: disabled
+      ? 'var(--t-font-color-primary)'
+      : variant === 'primary'
+        ? 'var(--t-font-color-inverted)'
+        : 'var(--t-font-color-primary)',
     borderRadius: 4, cursor: disabled ? 'not-allowed' : 'pointer', fontWeight: 500,
   });
   const badge = (color: string): CSSProperties => ({
