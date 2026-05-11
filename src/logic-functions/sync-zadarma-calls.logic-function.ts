@@ -160,11 +160,16 @@ const buildPersonsByPhoneSuffix = async (
 // callStart presence (legacy null-callStart rows included).
 const PBX_CALL_ID_QUERY_CHUNK = 200;
 
-const fetchExistingPbxCallIds = async (
+type ExistingCallLogRow = { id: string; callId: string | null };
+
+// Returns a map keyed by pbxCallId so callers can both (a) dedupe new
+// rows and (b) backfill missing fields (callId etc) on existing rows
+// without a second round-trip.
+const fetchExistingCallLogsByPbxCallId = async (
   client: CoreApiClient,
   pbxCallIds: string[],
-): Promise<Set<string>> => {
-  const set = new Set<string>();
+): Promise<Map<string, ExistingCallLogRow>> => {
+  const map = new Map<string, ExistingCallLogRow>();
   for (let i = 0; i < pbxCallIds.length; i += PBX_CALL_ID_QUERY_CHUNK) {
     const slice = pbxCallIds.slice(i, i + PBX_CALL_ID_QUERY_CHUNK);
     const res = (await client.query({
@@ -173,16 +178,25 @@ const fetchExistingPbxCallIds = async (
           filter: { pbxCallId: { in: slice } },
           first: PBX_CALL_ID_QUERY_CHUNK,
         },
-        edges: { node: { pbxCallId: true } },
+        edges: { node: { id: true, pbxCallId: true, callId: true } },
       },
     })) as {
-      callLogs?: { edges?: Array<{ node: { pbxCallId?: string | null } }> };
+      callLogs?: {
+        edges?: Array<{
+          node: { id: string; pbxCallId?: string | null; callId?: string | null };
+        }>;
+      };
     };
     for (const { node } of res.callLogs?.edges ?? []) {
-      if (node.pbxCallId) set.add(node.pbxCallId);
+      if (node.pbxCallId) {
+        map.set(node.pbxCallId, {
+          id: node.id,
+          callId: node.callId ?? null,
+        });
+      }
     }
   }
-  return set;
+  return map;
 };
 
 const formatChunks = (
@@ -249,6 +263,7 @@ type SyncResult = {
   fetched?: number;
   created?: number;
   skippedDup?: number;
+  backfilledCallId?: number;
   linked?: number;
   failed?: number;
   costed?: number;
@@ -373,17 +388,18 @@ const handler = async (
       fetched: 0,
       created: 0,
       skippedDup: 0,
+      backfilledCallId: 0,
       linked: 0,
       failed: 0,
       elapsedMs: Date.now() - startedAt,
     };
   }
 
-  const existingIds = await fetchExistingPbxCallIds(
+  const existingMap = await fetchExistingCallLogsByPbxCallId(
     client,
     parsed.map((r) => r.pbxCallId),
   );
-  const toCreate = parsed.filter((r) => !existingIds.has(r.pbxCallId));
+  const toCreate = parsed.filter((r) => !existingMap.has(r.pbxCallId));
   const skippedDup = parsed.length - toCreate.length;
 
   let linked = 0;
@@ -475,6 +491,41 @@ const handler = async (
     );
   }
 
+  // Backfill pass — update existing dup rows whose `callId` is empty with the
+  // value Zadarma returns in the stats response. Legacy rows ingested via the
+  // live webhook before v0.24.1 only carry `pbxCallId`; transcript fetch needs
+  // the Asterisk channel id (`callId`). One UPDATE per missing row, never
+  // overwrites a populated value.
+  let backfilledCallId = 0;
+  const backfillCandidates = parsed.filter((r) => {
+    if (!r.callId) return false;
+    const existing = existingMap.get(r.pbxCallId);
+    return existing !== undefined && !existing.callId;
+  });
+  if (backfillCandidates.length > 0) {
+    for (let i = 0; i < backfillCandidates.length; i += MUTATION_BATCH) {
+      const wave = backfillCandidates.slice(i, i + MUTATION_BATCH);
+      const results = await Promise.allSettled(
+        wave.map((row) => {
+          const existing = existingMap.get(row.pbxCallId);
+          if (!existing) return Promise.resolve(null);
+          return client.mutation({
+            updateCallLog: {
+              __args: { id: existing.id, data: { callId: row.callId } },
+              id: true,
+            },
+          });
+        }),
+      );
+      for (const r of results) {
+        if (r.status === 'fulfilled' && r.value !== null) backfilledCallId++;
+      }
+    }
+    console.log(
+      `[sync-zadarma-calls] backfill callId on dup rows: candidates=${backfillCandidates.length} updated=${backfilledCallId}`,
+    );
+  }
+
   // Enrichment: fetch recording link + transcript for newly-created rows that
   // are long enough to be worth processing. Bounded by ENRICHMENT_BUDGET_MS so
   // we never blow the sync timeout. Anything left over surfaces via
@@ -501,7 +552,7 @@ const handler = async (
 
   const elapsedMs = Date.now() - startedAt;
   console.log(
-    `[sync-zadarma-calls] DONE window=${windowFrom}..${windowTo} chunks=${chunks.length} fetched=${parsed.length} created=${created} skippedDup=${totalSkippedDup} linked=${linked} failed=${failed} elapsedMs=${elapsedMs}`,
+    `[sync-zadarma-calls] DONE window=${windowFrom}..${windowTo} chunks=${chunks.length} fetched=${parsed.length} created=${created} skippedDup=${totalSkippedDup} backfilledCallId=${backfilledCallId} linked=${linked} failed=${failed} elapsedMs=${elapsedMs}`,
   );
 
   return {
@@ -511,6 +562,7 @@ const handler = async (
     fetched: parsed.length,
     created,
     skippedDup: totalSkippedDup,
+    backfilledCallId,
     linked,
     failed,
     costed,
@@ -523,7 +575,7 @@ export default defineLogicFunction({
   universalIdentifier: SYNC_ZADARMA_CALLS_LOGIC_FUNCTION_UNIVERSAL_IDENTIFIER,
   name: 'sync-zadarma-calls',
   description:
-    'Live sync: fetches PBX call history via Zadarma /v1/statistics/pbx/ and inserts new callLog rows (deduped by pbxCallId, auto-linked to Persons by phone suffix). Default window: max(callStart) - 1h → now. Custom range capped at 365 days. Rate-limited fetches in 31-day chunks (3 req/min).',
+    'Live sync: fetches PBX call history via Zadarma /v1/statistics/pbx/, inserts new callLog rows (deduped by pbxCallId, auto-linked to Persons by phone suffix), and backfills callId on existing dup rows where it is missing. Default window: max(callStart) - 1h → now. Custom range capped at 365 days. Rate-limited fetches in 31-day chunks (3 req/min).',
   timeoutSeconds: 300,
   handler,
   httpRouteTriggerSettings: {
