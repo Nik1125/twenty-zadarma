@@ -117,10 +117,20 @@ const handler = async (
   while (candidates.length < limit && hasNextPageInScan) {
     // Build filter — date bounds (when present) live in an `and:` array
     // because Twenty rejects multiple operators on the same field in one
-    // object (`{ callStart: { gte, lte } }` returns 500).
+    // object (`{ callStart: { gte, lte } }` returns 500). The
+    // duration:gte threshold narrows the scan universe to rows that
+    // could actually be charged — without it, short answered calls
+    // dominate every page (computed=null, costsEqual(null,null)=true,
+    // unchanged) and waste pagination budget. With the threshold the
+    // scan walks ONLY rows that should have a non-null cost, so the
+    // ones we already wrote stamp out of the universe and the residual
+    // shrinks monotonically to zero.
     const baseFilter: Record<string, unknown> = { callType: { eq: 'OUT' } };
     if (onlyMissing) {
       baseFilter.cost = { amountMicros: { is: 'NULL' } };
+      if (rates.minChargeableDurationSeconds > 0) {
+        baseFilter.duration = { gte: rates.minChargeableDurationSeconds };
+      }
     }
     const filter =
       fromIso || toIso

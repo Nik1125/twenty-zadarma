@@ -21,7 +21,7 @@ export const buildEnrichmentCurl = (endpointUrl: string): string => {
       aiAgentName: '<agent_name>',
       aiTransferred: false,
       aiCost: { amountMicros: 0, currencyCode: 'USD' },
-      aiSummary: '<summary>',
+      summary: '<summary>',
       aiTranscript: '<transcript>',
       recordingUrl: '<recording_url>',
       // Universal analysis (no `ai` prefix as of v0.25). The endpoint

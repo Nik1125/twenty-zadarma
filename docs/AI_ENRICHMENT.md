@@ -21,12 +21,12 @@ creating a duplicate.
 > **v0.19.0 schema split** — transcripts now land on dedicated rich-text
 > fields (`aiTranscript` for vendor transcripts, `transcript` for Zadarma
 > speech-recognition manager-side). Earlier `data.transcript` / `data.summary`
-> field names have been renamed to `data.aiTranscript` / `data.aiSummary`,
+> field names have been renamed to `data.aiTranscript` / `data.summary`,
 > and the linked-Note pattern for vendor debug data has been retired —
 > everything that should be persisted lives on typed callLog fields.
 
 > **v0.22.0 RICH_TEXT v2** — the `/zadarma/call-enrichment` endpoint now
-> wraps `aiTranscript` and `aiSummary` strings through a markdown→BlockNote
+> wraps `aiTranscript` and `summary` strings through a markdown→BlockNote
 > converter server-side. Callers send plain markdown as a string (as shown
 > in this doc) and the App produces the `{ markdown, blocknote }` payload
 > Twenty needs for proper rendering on first read. **No client-side change
@@ -59,7 +59,7 @@ Retell fires `call_analyzed` webhook to n8n
                  requireExtensions: true }
         data:  { aiVendor: 'retell', aiAgentName, sentiment,
                  successful, aiTransferred, aiCost,
-                 aiTranscript, aiSummary, recordingUrl,
+                 aiTranscript, summary, recordingUrl,
                  interestLevel, actionRequired,
                  actionContext, keyTopics }
         → 200 { ok, matched: true, callLogId, matchedBy, offsetMs }
@@ -109,7 +109,7 @@ Content-Type: application/json
                                                   // amountMicros = USD * 10^6
     correlationId?:   string,                    // alternative to match.correlationId
     aiTranscript?:    string,                    // RICH_TEXT, plain text accepted
-    aiSummary?:       string,                    // RICH_TEXT (mapped to callLog.summary)
+    summary?:       string,                    // RICH_TEXT (mapped to callLog.summary)
     recordingUrl?:    string,                    // sets callLog.recording (LINKS)
 
     // Post-call analyser output (optional). Each field is silently dropped
@@ -219,7 +219,7 @@ n8n `call_analyzed` webhook payload → enrichment body:
 | `data.aiCost.amountMicros` | `Math.round(body.call.call_cost.combined_cost * 10000)` (Retell cost is in cents → dollars × 10^6 = cents × 10^4) |
 | `data.aiCost.currencyCode` | `'USD'` |
 | `data.aiTranscript` | `body.call.transcript` |
-| `data.aiSummary` | `body.call.call_analysis.call_summary` |
+| `data.summary` | `body.call.call_analysis.call_summary` |
 | `data.recordingUrl` | `body.call.recording_url` |
 | `data.interestLevel` | post-call analyser output |
 | `data.actionRequired` | post-call analyser output |
@@ -291,7 +291,7 @@ return [{
           currencyCode: 'USD',
         } : undefined,
         aiTranscript: formatTranscript(call.transcript),
-        aiSummary: call.call_analysis?.call_summary,
+        summary: call.call_analysis?.call_summary,
         recordingUrl: call.recording_url,
         // Optional — populate from a separate post-call analyser node:
         // interestLevel: analyser.interest_level,

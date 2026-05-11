@@ -64,7 +64,8 @@ type EnrichmentBody = {
     aiCost?: { amountMicros?: number; currencyCode?: string };
     correlationId?: string;
     aiTranscript?: string;
-    aiSummary?: string; // body field name (callLog column is `summary`)
+    summary?: string;   // new canonical key (matches the callLog column name)
+    aiSummary?: string; // legacy v0.24 key, still accepted
     recordingUrl?: string;
 
     // Universal analysis — accept new keys + legacy `ai*` keys for
@@ -171,8 +172,14 @@ const handler = async (
   if (typeof data.aiTranscript === 'string') {
     updateData.aiTranscript = formatMarkdownToBlocknote(data.aiTranscript);
   }
-  if (typeof data.aiSummary === 'string') {
-    updateData.summary = formatMarkdownToBlocknote(data.aiSummary);
+  const summaryRaw = pickEnrichmentKey(
+    data.summary,
+    data.aiSummary,
+    'aiSummary',
+    'summary',
+  );
+  if (typeof summaryRaw === 'string') {
+    updateData.summary = formatMarkdownToBlocknote(summaryRaw);
   }
   if (typeof data.recordingUrl === 'string' && data.recordingUrl.length > 0) {
     updateData.recording = {
