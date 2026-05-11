@@ -42,8 +42,8 @@ query AgentContext($personId: UUID!) {
           callerType
           aiVendor
           aiAgentName
-          aiSentiment
-          aiSuccessful
+          sentiment
+          successful
           summary
         }
       }

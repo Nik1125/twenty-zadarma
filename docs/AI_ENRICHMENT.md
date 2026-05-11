@@ -51,17 +51,17 @@ Zadarma fires NOTIFY_OUT_END (~12s before Retell)        ┌──────�
 Retell fires `call_analyzed` webhook to n8n
   └─ n8n adapter:
      1. (optional) Run post-call analyser LLM to extract
-        aiInterestLevel / aiActionRequired / aiActionContext / aiKeyTopics
+        interestLevel / actionRequired / actionContext / keyTopics
         from the Retell transcript.
      2. POST /zadarma/call-enrichment
         match: { correlationId, fromNumber, toNumber,
                  startTimestamp, windowSeconds: 60,
                  requireExtensions: true }
-        data:  { aiVendor: 'retell', aiAgentName, aiSentiment,
-                 aiSuccessful, aiTransferred, aiCost,
+        data:  { aiVendor: 'retell', aiAgentName, sentiment,
+                 successful, aiTransferred, aiCost,
                  aiTranscript, aiSummary, recordingUrl,
-                 aiInterestLevel, aiActionRequired,
-                 aiActionContext, aiKeyTopics }
+                 interestLevel, actionRequired,
+                 actionContext, keyTopics }
         → 200 { ok, matched: true, callLogId, matchedBy, offsetMs }
 ```
 
@@ -100,9 +100,9 @@ Content-Type: application/json
     // All optional. Only fields present in the body are written.
     aiVendor?:        string,                    // "retell" | "vapi" | ...
     aiAgentName?:     string,                    // "Amelia v6.2 — Router"
-    aiSentiment?:     'POSITIVE' | 'NEGATIVE' | 'NEUTRAL' | 'UNKNOWN',
+    sentiment?:     'POSITIVE' | 'NEGATIVE' | 'NEUTRAL' | 'UNKNOWN',
                                                   // also accepts case-insensitive input
-    aiSuccessful?:    boolean,
+    successful?:    boolean,
     aiTransferred?:   boolean,                   // escalated to human or another agent?
     aiCost?:          { amountMicros: number, currencyCode?: string },
                                                   // currencyCode default 'USD'
@@ -115,8 +115,8 @@ Content-Type: application/json
     // Post-call analyser output (optional). Each field is silently dropped
     // if malformed (unknown enum, non-array, etc.) — never breaks the rest
     // of the update.
-    aiInterestLevel?: number,                    // 1-5; clamped + rounded
-    aiActionRequired?:
+    interestLevel?: number,                    // 1-5; clamped + rounded
+    actionRequired?:
       | 'NONE'
       | 'SMS_FOLLOWUP'
       | 'EMAIL_OFFER'
@@ -124,12 +124,39 @@ Content-Type: application/json
       | 'OPERATOR_TASK'
       | 'HUMAN_TRANSFER'
       | 'DO_NOT_CONTACT',
-    aiActionContext?: string,                    // ~1-3 sentence rationale
-    aiKeyTopics?:     string[],                  // free-form tags;
+    actionContext?: string,                    // ~1-3 sentence rationale
+    keyTopics?:     string[],                  // free-form tags;
                                                   // convention `objection:<reason>` for objections
+
+    // v0.25+ universal analysis fields.
+    outcome?:
+      | 'WON'
+      | 'LOST'
+      | 'FOLLOWUP'
+      | 'DISQUALIFIED'
+      | 'NO_CONTACT'
+      | 'CALLBACK'
+      | 'INCOMPLETE'
+      | 'OTHER',                                // high-level result of the call
+    score?:         number,                    // manager perf 1-5; 0 / <1 / null = skipped
+    scoreReason?:   string,                    // justification, or "skipped: <reason>"
+    keyFacts?:      Array<{ type: string, value: string }>,
+                                                  // structured client attrs aggregated by the
+                                                  // Biography refresh workflow
   }
 }
 ```
+
+### Back-compat for v0.24 adapters
+
+Through v0.24 the analysis fields above were named with an `ai` prefix
+(`aiSentiment`, `aiSuccessful`, `aiInterestLevel`, `aiActionRequired`,
+`aiActionContext`, `aiKeyTopics`). v0.25 renames them universally. The
+endpoint **still accepts the legacy keys** — when both forms are present
+in the same body the new (un-prefixed) key wins, and the first legacy
+key seen per process emits a one-shot `console.warn` to the server log.
+Existing n8n flows keep working without immediate updates; switch to the
+new keys at your own pace.
 
 ### Response
 
@@ -186,18 +213,18 @@ n8n `call_analyzed` webhook payload → enrichment body:
 | `match.requireExtensions` | `true` (assumes `AI_EXTENSIONS` set in App settings) |
 | `data.aiVendor` | `'retell'` |
 | `data.aiAgentName` | `body.call.agent_name` |
-| `data.aiSentiment` | `body.call.call_analysis.user_sentiment.toUpperCase()` |
-| `data.aiSuccessful` | `body.call.call_analysis.call_successful` |
+| `data.sentiment` | `body.call.call_analysis.user_sentiment.toUpperCase()` |
+| `data.successful` | `body.call.call_analysis.call_successful` |
 | `data.aiTransferred` | `body.call.tool_calls?.some(tc => tc.type === 'agent_swap') \|\| !!body.call.call_analysis.custom_analysis_data.transferred_to` |
 | `data.aiCost.amountMicros` | `Math.round(body.call.call_cost.combined_cost * 10000)` (Retell cost is in cents → dollars × 10^6 = cents × 10^4) |
 | `data.aiCost.currencyCode` | `'USD'` |
 | `data.aiTranscript` | `body.call.transcript` |
 | `data.aiSummary` | `body.call.call_analysis.call_summary` |
 | `data.recordingUrl` | `body.call.recording_url` |
-| `data.aiInterestLevel` | post-call analyser output |
-| `data.aiActionRequired` | post-call analyser output |
-| `data.aiActionContext` | post-call analyser output |
-| `data.aiKeyTopics` | post-call analyser output |
+| `data.interestLevel` | post-call analyser output |
+| `data.actionRequired` | post-call analyser output |
+| `data.actionContext` | post-call analyser output |
+| `data.keyTopics` | post-call analyser output |
 
 ## n8n adapter — paste-ready snippets
 
@@ -256,8 +283,8 @@ return [{
       data: {
         aiVendor: 'retell',
         aiAgentName: call.agent_name,
-        aiSentiment: sentiment,
-        aiSuccessful: call.call_analysis?.call_successful ?? null,
+        sentiment: sentiment,
+        successful: call.call_analysis?.call_successful ?? null,
         aiTransferred: transferred,
         aiCost: typeof call.call_cost?.combined_cost === 'number' ? {
           amountMicros: Math.round(call.call_cost.combined_cost * 10000),
@@ -267,10 +294,10 @@ return [{
         aiSummary: call.call_analysis?.call_summary,
         recordingUrl: call.recording_url,
         // Optional — populate from a separate post-call analyser node:
-        // aiInterestLevel: analyser.interest_level,
-        // aiActionRequired: analyser.action_required,
-        // aiActionContext:  analyser.action_context,
-        // aiKeyTopics:      [...analyser.products, ...analyser.objections.map(o => `objection:${o}`)],
+        // interestLevel: analyser.interest_level,
+        // actionRequired: analyser.action_required,
+        // actionContext:  analyser.action_context,
+        // keyTopics:      [...analyser.products, ...analyser.objections.map(o => `objection:${o}`)],
       },
     },
     metadata: call.metadata ?? {},
@@ -299,8 +326,8 @@ as a transient failure and retry — Zadarma webhook may not have landed yet.
 ### 3. (optional) Function node — post-call analyser
 
 If the call is meaningful enough to warrant structured analysis, run an LLM
-node against `call.transcript` to produce `aiInterestLevel`,
-`aiActionRequired`, `aiActionContext`, `aiKeyTopics`, and merge those into
+node against `call.transcript` to produce `interestLevel`,
+`actionRequired`, `actionContext`, `keyTopics`, and merge those into
 the enrichment body before step 2. Skip for short / voicemail / cancelled
 calls — leave the structured fields empty in those cases.
 
@@ -323,15 +350,15 @@ via the standard Settings → Applications → Zadarma → Variables tab.
 
 With the structured fields, Twenty `group_by` enables:
 
-- **AI agent leaderboard** — group by `aiAgentName`, count + avg(aiSuccessful).
-- **Sentiment trend** — group by `callStart` week + `aiSentiment`.
+- **AI agent leaderboard** — group by `aiAgentName`, count + avg(successful).
+- **Sentiment trend** — group by `callStart` week + `sentiment`.
 - **Transfer rate** — `count(aiTransferred=true) / count(aiVendor IS NOT NULL)`.
 - **Cost per agent** — group by `aiAgentName`, sum(aiCost).
 - **AI vs human comparison** — split: `aiVendor IS NULL` (human) vs `aiVendor IS NOT NULL`, compare avg duration / disposition / negative-sentiment-rate.
 - **Cost waterfall** — `cost + aiCost = total cost per call`, group by month.
-- **Hot-lead funnel** — filter `aiInterestLevel >= 4`, group by `aiActionRequired`, age = now - callStart. Catches leads in `EMAIL_OFFER` / `CALLBACK` / `OPERATOR_TASK` that haven't been worked yet.
-- **Action backlog** — count callLogs by `aiActionRequired` for the current day; surfaces unhandled `OPERATOR_TASK` / `HUMAN_TRANSFER`.
-- **Topic frequency** — full-text search `aiKeyTopics` for product / objection tags to track what dominates conversations week-over-week.
+- **Hot-lead funnel** — filter `interestLevel >= 4`, group by `actionRequired`, age = now - callStart. Catches leads in `EMAIL_OFFER` / `CALLBACK` / `OPERATOR_TASK` that haven't been worked yet.
+- **Action backlog** — count callLogs by `actionRequired` for the current day; surfaces unhandled `OPERATOR_TASK` / `HUMAN_TRANSFER`.
+- **Topic frequency** — full-text search `keyTopics` for product / objection tags to track what dominates conversations week-over-week.
 
 ## Security
 

@@ -112,10 +112,10 @@ return [{
       ...enrichment,
       data: {
         ...enrichment.data,
-        aiInterestLevel: analyser.interest_level,
-        aiActionRequired: analyser.action_required,
-        aiActionContext: analyser.action_context,
-        aiKeyTopics: [...products, ...objections],
+        interestLevel: analyser.interest_level,
+        actionRequired: analyser.action_required,
+        actionContext: analyser.action_context,
+        keyTopics: [...products, ...objections],
       },
     },
   },
@@ -411,7 +411,7 @@ Provides an audit trail without depending on App-side enums.
 ### Bio refresh fires too often
 
 - Add a longer debounce in Node 4 (e.g. 5 minutes). Or filter on
-  `aiInterestLevel >= 3` to only refresh on meaningful calls.
+  `interestLevel >= 3` to only refresh on meaningful calls.
 
 ### LLM costs spiking
 
