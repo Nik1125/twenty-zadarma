@@ -19,7 +19,10 @@ import { findLatestOpportunityIdForPerson } from 'src/modules/zadarma/utils/find
 //
 // Body (all optional):
 //   { limit?: number }              default 250, max 500
-//   { fromIso?, toIso? }            callStart bounds; UI chunks by month
+//   { fromIso?, toIso? }            domain-time bounds; applies to
+//                                   callLog.callStart AND smsLog.sentAt
+//                                   simultaneously so the UI can chunk
+//                                   both collections by the same window.
 //   { target?: 'callLog' | 'smsLog' | 'both' }   default 'both'
 
 const DEFAULT_LIMIT = 250;
@@ -47,16 +50,28 @@ type AttachResult = {
   elapsedMs: number;
 };
 
-const ALPHA_SORT = [{ createdAt: 'DescNullsLast' as const }];
+const NEWEST_FIRST = [{ createdAt: 'DescNullsLast' as const }];
 
+// Date column used for `{ fromIso, toIso }` chunking. callLog has
+// callStart, smsLog has sentAt — pick the right one per collection.
+const DATE_COLUMN_BY_COLLECTION = {
+  callLogs: 'callStart',
+  smsLogs: 'sentAt',
+} as const;
+
+// callLogs filter through `callStart`, smsLogs through `sentAt` — each
+// object's domain-time column. Date filter cannot use a single field
+// with multiple operators (`{ col: { gte, lte } }` → 500), so the
+// gte / lte conditions are wrapped in an `and: [...]` clause.
 const buildDateFilter = (
+  dateColumnName: string,
   fromIso: string | undefined,
   toIso: string | undefined,
 ): Record<string, unknown> | null => {
   if (!fromIso && !toIso) return null;
   const conds: Array<Record<string, unknown>> = [];
-  if (fromIso) conds.push({ callStart: { gte: fromIso } });
-  if (toIso) conds.push({ callStart: { lte: toIso } });
+  if (fromIso) conds.push({ [dateColumnName]: { gte: fromIso } });
+  if (toIso) conds.push({ [dateColumnName]: { lte: toIso } });
   return { and: conds };
 };
 
@@ -75,10 +90,11 @@ const drainCollection = async (
   failed: number;
   hasMore: boolean;
 }> => {
-  // smsLogs don't have a `callStart` column — the date window applies to
-  // callLogs only. UI passes the same bounds for both targets; this
-  // helper just drops the filter for smsLogs.
-  const dateFilter = collection === 'callLogs' ? buildDateFilter(fromIso, toIso) : null;
+  const dateFilter = buildDateFilter(
+    DATE_COLUMN_BY_COLLECTION[collection],
+    fromIso,
+    toIso,
+  );
   const baseFilter: Record<string, unknown> = {
     personId: { is: 'NOT_NULL' },
     opportunityId: { is: 'NULL' },
@@ -95,7 +111,7 @@ const drainCollection = async (
       [collection]: {
         __args: {
           filter,
-          orderBy: ALPHA_SORT,
+          orderBy: NEWEST_FIRST,
           first: PAGE_SIZE,
           ...(after ? { after } : {}),
         },
