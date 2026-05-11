@@ -45,7 +45,75 @@ describe('composeTeamSaleUrl', () => {
 });
 
 describe('lookupLeadByPhone', () => {
-  it('returns id from { leads: [{ id }] } envelope', async () => {
+  it('returns id from real { status, data: { leads: [...] } } envelope when phone matches', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      mockFetch(200, {
+        status: 'success',
+        data: {
+          leads: [
+            {
+              id: '80165732',
+              name: 'Jowita Karkut',
+              phones: [{ id: '1', phone: '+48539923725', type: 'personal' }],
+            },
+          ],
+          totalCount: 1,
+        },
+      }),
+    );
+    expect(await lookupLeadByPhone('+48539923725', CREDS)).toBe('80165732');
+  });
+
+  it('returns null when search fuzzy-matches a lead whose phones do not contain the exact target', async () => {
+    // Real risk: ?search=+48539 may return leads matching "539" in name/comment,
+    // not by phone. We must not silently link Person to the wrong lead.
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      mockFetch(200, {
+        status: 'success',
+        data: {
+          leads: [
+            {
+              id: '99999',
+              name: 'Unrelated 539',
+              phones: [{ phone: '+48999999999' }],
+            },
+          ],
+          totalCount: 1,
+        },
+      }),
+    );
+    expect(await lookupLeadByPhone('+48539923725', CREDS)).toBeNull();
+  });
+
+  it('returns the lead whose phones include the exact target when multiple leads come back', async () => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      mockFetch(200, {
+        status: 'success',
+        data: {
+          leads: [
+            { id: '111', phones: [{ phone: '+48999111111' }] },
+            { id: '222', phones: [{ phone: '+48539923725' }] },
+            { id: '333', phones: [{ phone: '+48999333333' }] },
+          ],
+          totalCount: 3,
+        },
+      }),
+    );
+    expect(await lookupLeadByPhone('+48539923725', CREDS)).toBe('222');
+  });
+
+  it('signs request with search=<phone>, not phone=<phone>', async () => {
+    let capturedUrl: string | undefined;
+    vi.spyOn(globalThis, 'fetch').mockImplementation(async (url) => {
+      capturedUrl = String(url);
+      return mockFetch(200, { status: 'success', data: { leads: [], totalCount: 0 } });
+    });
+    await lookupLeadByPhone('+48539923725', CREDS);
+    expect(capturedUrl).toContain('search=%2B48539923725');
+    expect(capturedUrl).not.toContain('phone=');
+  });
+
+  it('returns id from legacy flat { leads: [{ id }] } envelope (no phones field)', async () => {
     vi.spyOn(globalThis, 'fetch').mockResolvedValue(
       mockFetch(200, { leads: [{ id: 80389317 }] }),
     );
@@ -53,7 +121,7 @@ describe('lookupLeadByPhone', () => {
     expect(id).toBe('80389317');
   });
 
-  it('returns id from { data: [{ id }] } envelope', async () => {
+  it('returns id from legacy flat { data: [{ id }] } envelope (no phones field)', async () => {
     vi.spyOn(globalThis, 'fetch').mockResolvedValue(
       mockFetch(200, { data: [{ id: 'abc-1' }] }),
     );
@@ -62,7 +130,7 @@ describe('lookupLeadByPhone', () => {
 
   it('returns null on empty list', async () => {
     vi.spyOn(globalThis, 'fetch').mockResolvedValue(
-      mockFetch(200, { leads: [] }),
+      mockFetch(200, { status: 'success', data: { leads: [], totalCount: 0 } }),
     );
     expect(await lookupLeadByPhone('+48...', CREDS)).toBeNull();
   });

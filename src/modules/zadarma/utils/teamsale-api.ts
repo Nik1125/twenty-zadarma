@@ -101,13 +101,44 @@ const pickLeadIdFromList = (raw: unknown): string | null => {
   return pickLeadId(raw);
 };
 
+// Pulls the leads array out of every observed Zadarma response envelope:
+//   { status, data: { leads: [...] } }   ← real production shape (verified
+//                                          against subdomain 60719, 2026-05)
+//   { leads: [...] }                     ← legacy / flat shape
+//   { data: [...] }                      ← alternative flat shape
+//   { list: [...] }                      ← seen on older Zadarma endpoints
+const extractLeadsArray = (
+  raw: unknown,
+): Array<Record<string, unknown>> | null => {
+  if (!raw || typeof raw !== 'object') return null;
+  const obj = raw as Record<string, unknown>;
+  const dataObj = obj.data as Record<string, unknown> | undefined;
+  const candidates: unknown[] = [
+    dataObj?.leads, // real production shape
+    obj.leads,
+    obj.data,
+    obj.list,
+  ];
+  for (const c of candidates) {
+    if (Array.isArray(c)) return c as Array<Record<string, unknown>>;
+  }
+  return null;
+};
+
 export const lookupLeadByPhone = async (
   phone: string,
   creds: TeamSaleApiCreds,
 ): Promise<string | null> => {
   const { url, headers } = signZadarmaRequest({
     method: ENDPOINT_LEADS,
-    params: { phone },
+    // NB: `phone` is silently dropped by TeamSale's GET /v1/zcrm/leads —
+    // the only param the endpoint actually filters by is `search`. Empirically
+    // verified 2026-05-11 against the live algenessai.teamsale.com workspace:
+    //   ?phone=+48...  → returns the whole subdomain (totalCount 1929)
+    //   ?search=+48... → returns the single matching lead (totalCount 1)
+    // `search` is fuzzy / substring-based, so we defensively re-confirm an
+    // exact phone match below before returning the id.
+    params: { search: phone },
     userKey: creds.userKey,
     secret: creds.secret,
     httpMethod: 'GET',
@@ -134,12 +165,29 @@ export const lookupLeadByPhone = async (
       body,
     );
   }
-  // Defensive: if status="error" + a message about "no leads", return null.
   const j = json as Record<string, unknown>;
   if (j.status === 'error') {
     return null;
   }
-  return pickLeadIdFromList(json);
+  const leads = extractLeadsArray(json);
+  if (!leads || leads.length === 0) return null;
+  // `search` is fuzzy. Prefer a lead whose `phones[]` includes the exact
+  // target phone; fall back to the first lead only if no entries expose a
+  // phones field (legacy / hand-crafted responses without phones metadata).
+  const exact = leads.find((l) => {
+    const phones = l.phones as Array<{ phone?: string }> | undefined;
+    return (
+      Array.isArray(phones) && phones.some((p) => p?.phone === phone)
+    );
+  });
+  if (exact) return pickLeadId(exact);
+  const anyHasPhones = leads.some((l) => Array.isArray(l.phones));
+  if (anyHasPhones) {
+    // The result set declared phones for at least one row but none matched —
+    // this is a fuzzy false-positive from `search`, not our lead.
+    return null;
+  }
+  return pickLeadId(leads[0]);
 };
 
 export const createLead = async (
