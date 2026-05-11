@@ -33,9 +33,13 @@ export const CALL_LOG_AI_VENDOR_FIELD_UNIVERSAL_IDENTIFIER =
   '7e2d8a91-3c4f-4b15-9e02-1f6a8d3e4c12';
 export const CALL_LOG_AI_AGENT_NAME_FIELD_UNIVERSAL_IDENTIFIER =
   'b3f9c47e-2a18-4d65-8c91-5e7f3a9b2d04';
-export const CALL_LOG_AI_SENTIMENT_FIELD_UNIVERSAL_IDENTIFIER =
+// SENTIMENT / SUCCESSFUL / INTEREST_LEVEL / ACTION_REQUIRED / ACTION_CONTEXT
+// / KEY_TOPICS UIDs preserved verbatim from v0.24.x (formerly named with the
+// "ai" prefix). Manifest migration matches by UID, so renaming only the
+// `name` / `label` values leaves stored data intact.
+export const CALL_LOG_SENTIMENT_FIELD_UNIVERSAL_IDENTIFIER =
   '4c8e1d23-9f56-4a72-b30e-6d8c5f4a1b97';
-export const CALL_LOG_AI_SUCCESSFUL_FIELD_UNIVERSAL_IDENTIFIER =
+export const CALL_LOG_SUCCESSFUL_FIELD_UNIVERSAL_IDENTIFIER =
   'a7d2f834-5b6c-4e91-9234-1f8e6c3d9b25';
 export const CALL_LOG_AI_TRANSFERRED_FIELD_UNIVERSAL_IDENTIFIER =
   'e9b6f124-7d83-4c25-a614-3f5d9e2c8a07';
@@ -49,14 +53,24 @@ export const CALL_LOG_CALL_ID_FIELD_UNIVERSAL_IDENTIFIER =
   '2b1a7c93-4e58-4fb2-9de7-3a8c5f1d2e64';
 export const CALL_LOG_AI_TRANSCRIPT_FIELD_UNIVERSAL_IDENTIFIER =
   'fa3776d8-5b3e-4fba-b1cd-b5c487bc9a13';
-export const CALL_LOG_AI_INTEREST_LEVEL_FIELD_UNIVERSAL_IDENTIFIER =
+export const CALL_LOG_INTEREST_LEVEL_FIELD_UNIVERSAL_IDENTIFIER =
   '1694a529-3374-466f-a9b0-5e195d363928';
-export const CALL_LOG_AI_ACTION_REQUIRED_FIELD_UNIVERSAL_IDENTIFIER =
+export const CALL_LOG_ACTION_REQUIRED_FIELD_UNIVERSAL_IDENTIFIER =
   '29e654d2-9ccb-4df0-bc63-d8e6e71df869';
-export const CALL_LOG_AI_ACTION_CONTEXT_FIELD_UNIVERSAL_IDENTIFIER =
+export const CALL_LOG_ACTION_CONTEXT_FIELD_UNIVERSAL_IDENTIFIER =
   'c29dc16d-195d-4d9c-bad7-71d964e6a1fd';
-export const CALL_LOG_AI_KEY_TOPICS_FIELD_UNIVERSAL_IDENTIFIER =
+export const CALL_LOG_KEY_TOPICS_FIELD_UNIVERSAL_IDENTIFIER =
   'eaed9baa-9036-40ae-888a-fc1c0d74cf2c';
+
+// NEW fields v0.25.0 — universal analysis schema.
+export const CALL_LOG_OUTCOME_FIELD_UNIVERSAL_IDENTIFIER =
+  '2aaac5ff-abe2-4db6-a456-9a55c65e0456';
+export const CALL_LOG_SCORE_FIELD_UNIVERSAL_IDENTIFIER =
+  '6ab38635-3860-4d68-b190-221f416095f7';
+export const CALL_LOG_SCORE_REASON_FIELD_UNIVERSAL_IDENTIFIER =
+  '50da5d02-844d-4a81-9817-bacd21af1ddb';
+export const CALL_LOG_KEY_FACTS_FIELD_UNIVERSAL_IDENTIFIER =
+  '4794cd85-8e3a-4200-a651-b76cfaa06b86';
 
 export default defineObject({
   universalIdentifier: CALL_LOG_OBJECT_UNIVERSAL_IDENTIFIER,
@@ -233,7 +247,7 @@ export default defineObject({
       name: 'aiTranscript',
       label: 'AI transcript',
       description:
-        'Dialog transcript from the AI vendor (e.g. Retell). Set by external automation via /zadarma/call-enrichment. Mutually exclusive with the manager transcript field.',
+        'Dialog transcript from an AI vendor (e.g. Retell). Set by external automation via /zadarma/call-enrichment. Mutually exclusive with the manager transcript field.',
       icon: 'IconRobot',
       isNullable: true,
     },
@@ -241,27 +255,115 @@ export default defineObject({
       universalIdentifier: CALL_LOG_SUMMARY_FIELD_UNIVERSAL_IDENTIFIER,
       type: FieldType.RICH_TEXT,
       name: 'summary',
-      label: 'AI summary',
+      label: 'Summary',
       description:
-        'Short LLM-generated summary of the conversation. Set by external automation via /zadarma/call-enrichment regardless of whether the call was handled by a manager or an AI vendor.',
+        'Short summary of the conversation. Populated by the post-call analyser via /zadarma/call-enrichment regardless of whether the call was handled by a manager or an AI vendor. 1-2 sentences.',
       icon: 'IconNotes',
       isNullable: true,
     },
     {
-      universalIdentifier: CALL_LOG_AI_INTEREST_LEVEL_FIELD_UNIVERSAL_IDENTIFIER,
+      universalIdentifier: CALL_LOG_INTEREST_LEVEL_FIELD_UNIVERSAL_IDENTIFIER,
       type: FieldType.NUMBER,
-      name: 'aiInterestLevel',
-      label: 'AI interest level',
+      name: 'interestLevel',
+      label: 'Interest level',
       description:
-        'Lead interest level on a 1-5 scale, classified by the post-call analyser. Use for warm-lead ranking in dashboards.',
+        "Lead's interest level on a 1-5 scale as classified by the post-call analyser. Use for warm-lead ranking in dashboards.",
       icon: 'IconFlame',
       isNullable: true,
     },
     {
-      universalIdentifier: CALL_LOG_AI_ACTION_REQUIRED_FIELD_UNIVERSAL_IDENTIFIER,
+      universalIdentifier: CALL_LOG_OUTCOME_FIELD_UNIVERSAL_IDENTIFIER,
       type: FieldType.SELECT,
-      name: 'aiActionRequired',
-      label: 'AI action required',
+      name: 'outcome',
+      label: 'Outcome',
+      description:
+        'High-level result of the call. Orthogonal to `actionRequired` (which is the recommended next step). Generic universal values — domain-specific labels (BOOKED, WRONG_PROFILE, ACCIDENTAL_LEAD…) live in the n8n classifier and map down to these eight buckets.',
+      icon: 'IconTarget',
+      isNullable: true,
+      options: [
+        {
+          id: '4dec7547-241f-48f9-a813-57a252d28914',
+          value: 'WON',
+          label: 'Won',
+          position: 0,
+          color: 'green',
+        },
+        {
+          id: 'af34f501-505d-42ae-8469-728cf5d94676',
+          value: 'LOST',
+          label: 'Lost',
+          position: 1,
+          color: 'red',
+        },
+        {
+          id: 'd78eb6df-bca7-44b2-a39a-4f9495a976fd',
+          value: 'FOLLOWUP',
+          label: 'Follow-up needed',
+          position: 2,
+          color: 'blue',
+        },
+        {
+          id: 'b4301053-3bb2-48bd-abdf-ac5b08270dd5',
+          value: 'DISQUALIFIED',
+          label: 'Disqualified',
+          position: 3,
+          color: 'gray',
+        },
+        {
+          id: 'd71841b0-98b3-4afd-be5e-9d43753278f1',
+          value: 'NO_CONTACT',
+          label: 'No contact',
+          position: 4,
+          color: 'orange',
+        },
+        {
+          id: '6b9125d9-e4a3-4dfc-8674-562646b484a2',
+          value: 'CALLBACK',
+          label: 'Callback requested',
+          position: 5,
+          color: 'yellow',
+        },
+        {
+          id: '60fa7961-c43a-455d-a3a0-a8d7eb77012f',
+          value: 'INCOMPLETE',
+          label: 'Incomplete',
+          position: 6,
+          color: 'pink',
+        },
+        {
+          id: '169a0538-25de-48e6-911c-af0394be9768',
+          value: 'OTHER',
+          label: 'Other',
+          position: 7,
+          color: 'purple',
+        },
+      ],
+    },
+    {
+      universalIdentifier: CALL_LOG_SCORE_FIELD_UNIVERSAL_IDENTIFIER,
+      type: FieldType.NUMBER,
+      name: 'score',
+      label: 'Score',
+      description:
+        "Manager performance score against the call script on a 1-5 scale. NULL = skip (call was not a real conversation: accidental, wrong number, language barrier, dialog <30s). Always pair with `scoreReason`.",
+      icon: 'IconStar',
+      isNullable: true,
+    },
+    {
+      universalIdentifier: CALL_LOG_SCORE_REASON_FIELD_UNIVERSAL_IDENTIFIER,
+      type: FieldType.TEXT,
+      name: 'scoreReason',
+      label: 'Score reason',
+      description:
+        "Short justification for the score, or the reason it was skipped. Convention for skipped: `skipped: <reason>` (e.g. 'skipped: accidental lead', 'skipped: language barrier'). Real evaluations are 1-3 sentences of feedback.",
+      icon: 'IconNote',
+      isNullable: true,
+    },
+    {
+      universalIdentifier: CALL_LOG_ACTION_REQUIRED_FIELD_UNIVERSAL_IDENTIFIER,
+      type: FieldType.SELECT,
+      name: 'actionRequired',
+      label: 'Action required',
       description:
         'Follow-up the post-call analyser recommends. Drives downstream workflows (SMS auto-send, operator-task creation, escalation, opt-out).',
       icon: 'IconBolt',
@@ -319,23 +421,33 @@ export default defineObject({
       ],
     },
     {
-      universalIdentifier: CALL_LOG_AI_ACTION_CONTEXT_FIELD_UNIVERSAL_IDENTIFIER,
+      universalIdentifier: CALL_LOG_ACTION_CONTEXT_FIELD_UNIVERSAL_IDENTIFIER,
       type: FieldType.TEXT,
-      name: 'aiActionContext',
-      label: 'AI action context',
+      name: 'actionContext',
+      label: 'Action context',
       description:
         'Free-form natural-language context for the recommended action (~1-3 sentences from the analyser). Read by the operator or by downstream workflows that need extra signal beyond the action enum.',
       icon: 'IconQuote',
       isNullable: true,
     },
     {
-      universalIdentifier: CALL_LOG_AI_KEY_TOPICS_FIELD_UNIVERSAL_IDENTIFIER,
+      universalIdentifier: CALL_LOG_KEY_TOPICS_FIELD_UNIVERSAL_IDENTIFIER,
       type: FieldType.RAW_JSON,
-      name: 'aiKeyTopics',
-      label: 'AI key topics',
+      name: 'keyTopics',
+      label: 'Key topics',
       description:
         'Array of topical tags extracted from the conversation. Free-form strings; convention is `topic` for plain topics and `objection:<reason>` for objections (e.g. ["algeness", "training_warsaw", "objection:price"]). Use for search and grouping.',
       icon: 'IconHash',
+      isNullable: true,
+    },
+    {
+      universalIdentifier: CALL_LOG_KEY_FACTS_FIELD_UNIVERSAL_IDENTIFIER,
+      type: FieldType.RAW_JSON,
+      name: 'keyFacts',
+      label: 'Key facts',
+      description:
+        'Array of structured client attributes extracted from the conversation, shape `[{type: string, value: string}]`. Examples: `{type:"specialty", value:"kosmetolog"}`, `{type:"experience", value:"5 lat"}`, `{type:"city", value:"Krakow"}`. The Biography refresh workflow aggregates `keyFacts` across all of a Person\'s calls; pure free-form type strings are accepted (domain layer decides the vocabulary).',
+      icon: 'IconList',
       isNullable: true,
     },
     {
@@ -368,11 +480,11 @@ export default defineObject({
       isNullable: true,
     },
     {
-      universalIdentifier: CALL_LOG_AI_SENTIMENT_FIELD_UNIVERSAL_IDENTIFIER,
+      universalIdentifier: CALL_LOG_SENTIMENT_FIELD_UNIVERSAL_IDENTIFIER,
       type: FieldType.SELECT,
-      name: 'aiSentiment',
-      label: 'AI sentiment',
-      description: 'User sentiment as classified by the AI vendor.',
+      name: 'sentiment',
+      label: 'Sentiment',
+      description: 'Conversation tone as classified by the post-call analyser.',
       icon: 'IconMoodSmile',
       isNullable: true,
       options: [
@@ -407,12 +519,12 @@ export default defineObject({
       ],
     },
     {
-      universalIdentifier: CALL_LOG_AI_SUCCESSFUL_FIELD_UNIVERSAL_IDENTIFIER,
+      universalIdentifier: CALL_LOG_SUCCESSFUL_FIELD_UNIVERSAL_IDENTIFIER,
       type: FieldType.BOOLEAN,
-      name: 'aiSuccessful',
-      label: 'AI successful',
+      name: 'successful',
+      label: 'Successful',
       description:
-        'Did the AI agent reach its goal in the call (vendor self-assessment)? Null if not analysed.',
+        'Did the call advance the deal toward its goal (post-call analyser self-assessment)? Null if not analysed.',
       icon: 'IconCircleCheck',
       isNullable: true,
     },
