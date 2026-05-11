@@ -344,11 +344,16 @@ const handleNotifyRecord = async (body: ZadarmaPbxEvent & Record<string, unknown
       );
       return { ok: false, action: 'record-no-call-log' };
     }
+    // Persist call_id_with_rec to callLog.callId — same value Zadarma exposes
+    // as the Asterisk channel id in /v1/statistics/pbx response. Required by
+    // /v1/speech_recognition/ for transcript fetch; without it the transcript
+    // backfill button silently fails for every call.
     await client.mutation({
       updateCallLog: {
         __args: {
           id: existingId,
           data: {
+            ...(callIdWithRec ? { callId: callIdWithRec } : {}),
             recording: {
               primaryLinkUrl: directLink,
               primaryLinkLabel: 'Recording',
@@ -359,7 +364,7 @@ const handleNotifyRecord = async (body: ZadarmaPbxEvent & Record<string, unknown
       },
     });
     console.log(
-      `[zadarma-pbx-webhook] NOTIFY_RECORD attached direct link to callLog=${existingId}`,
+      `[zadarma-pbx-webhook] NOTIFY_RECORD attached direct link to callLog=${existingId} callId=${callIdWithRec ?? '-'}`,
     );
     return { ok: true, action: 'record-attached-direct', callLogId: existingId };
   }
@@ -410,11 +415,15 @@ const handleNotifyRecord = async (body: ZadarmaPbxEvent & Record<string, unknown
     return { ok: false, action: 'record-no-call-log' };
   }
 
+  // Persist call_id_with_rec to callLog.callId — same value Zadarma exposes
+  // as the Asterisk channel id in /v1/statistics/pbx response. Required by
+  // /v1/speech_recognition/ for transcript fetch.
   await client.mutation({
     updateCallLog: {
       __args: {
         id: existingId,
         data: {
+          callId: callIdWithRec,
           recording: {
             primaryLinkUrl: recordingLink,
             primaryLinkLabel: 'Recording',
@@ -424,7 +433,9 @@ const handleNotifyRecord = async (body: ZadarmaPbxEvent & Record<string, unknown
       id: true,
     },
   });
-  console.log(`[zadarma-pbx-webhook] NOTIFY_RECORD attached link to callLog=${existingId}`);
+  console.log(
+    `[zadarma-pbx-webhook] NOTIFY_RECORD attached link to callLog=${existingId} callId=${callIdWithRec}`,
+  );
   return { ok: true, action: 'record-attached', callLogId: existingId };
 };
 
