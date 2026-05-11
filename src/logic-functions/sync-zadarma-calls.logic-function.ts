@@ -297,6 +297,7 @@ const handler = async (
     ZADARMA_RATE_CURRENCY: process.env.ZADARMA_RATE_CURRENCY,
     AI_RATE_PER_MINUTE: process.env.AI_RATE_PER_MINUTE,
     AI_RATE_CURRENCY: process.env.AI_RATE_CURRENCY,
+    MIN_CHARGEABLE_DURATION_SECONDS: process.env.MIN_CHARGEABLE_DURATION_SECONDS,
   });
   const aiExtensions = parseAiExtensions(process.env.AI_EXTENSIONS);
 

@@ -20,17 +20,29 @@ import {
 //
 // Body (all optional):
 //   { limit?: number }   default 250; max 500.
+//   { onlyMissing?: boolean } default true. When true, the candidate scan
+//                             pre-filters by `cost.amountMicros IS NULL`.
+//                             This is what the operator wants 99% of the
+//                             time — fill in the rows that have no cost
+//                             yet. It also dodges Twenty's deep-pagination
+//                             scan cap that otherwise leaves older rows
+//                             with cost=NULL because the per-call scan
+//                             ran out of `endCursor` before reaching them.
+//                             Set to false to refresh ALL outbound rows
+//                             (e.g. after a rate change), at the cost of
+//                             being subject to the pagination cap.
 //
-// Strategy: page newest-first through OUT callLogs, batch updateCallLog
-// 10-at-a-time, return counters + remaining-page hint so the UI can show
-// "click again to continue" until the message reads "Nothing to update".
+// Strategy: page newest-first through OUT callLogs (optionally filtered to
+// `cost IS NULL`), batch updateCallLog 10-at-a-time, return counters +
+// remaining-page hint so the UI can show "click again to continue" until
+// the message reads "Nothing to update".
 
 const DEFAULT_LIMIT = 250;
 const MAX_LIMIT = 500;
 const PAGE_SIZE = 200;
 const MUTATION_BATCH = 10;
 
-type RecomputeBody = { limit?: number };
+type RecomputeBody = { limit?: number; onlyMissing?: boolean };
 
 type CallLogRow = {
   id: string;
@@ -62,6 +74,7 @@ const handler = async (
     ZADARMA_RATE_CURRENCY: process.env.ZADARMA_RATE_CURRENCY,
     AI_RATE_PER_MINUTE: process.env.AI_RATE_PER_MINUTE,
     AI_RATE_CURRENCY: process.env.AI_RATE_CURRENCY,
+    MIN_CHARGEABLE_DURATION_SECONDS: process.env.MIN_CHARGEABLE_DURATION_SECONDS,
   });
   const ratesConfigured =
     (rates.zadarmaRatePerMinute !== null && rates.zadarmaCurrency !== null) ||
@@ -72,6 +85,12 @@ const handler = async (
     typeof requestedLimit === 'number' && requestedLimit > 0
       ? Math.min(Math.floor(requestedLimit), MAX_LIMIT)
       : DEFAULT_LIMIT;
+
+  // Default to onlyMissing=true so the common operator-flow ("Recompute all
+  // costs" button after upgrading or after setting rates for the first
+  // time) drains every row that has no cost. Cursor pagination in Twenty
+  // caps scan depth, so the no-filter path can leave older nulls behind.
+  const onlyMissing = event.body?.onlyMissing !== false;
 
   const client = new CoreApiClient();
 
@@ -89,7 +108,12 @@ const handler = async (
     const res = (await client.query({
       callLogs: {
         __args: {
-          filter: { callType: { eq: 'OUT' } },
+          filter: onlyMissing
+            ? {
+                callType: { eq: 'OUT' },
+                cost: { amountMicros: { is: 'NULL' } },
+              }
+            : { callType: { eq: 'OUT' } },
           orderBy: [{ callStart: 'DescNullsLast' }],
           first: PAGE_SIZE,
           ...(after ? { after } : {}),
@@ -181,7 +205,7 @@ const handler = async (
 
   const elapsedMs = Date.now() - startedAt;
   console.log(
-    `[recompute-costs] DONE ratesConfigured=${ratesConfigured} scanned=${scanned} picked=${candidates.length} updated=${updated} cleared=${cleared} unchanged=${unchanged} failed=${failed} hasMore=${hasNextPageInScan} elapsed=${elapsedMs}ms`,
+    `[recompute-costs] DONE onlyMissing=${onlyMissing} ratesConfigured=${ratesConfigured} scanned=${scanned} picked=${candidates.length} updated=${updated} cleared=${cleared} unchanged=${unchanged} failed=${failed} hasMore=${hasNextPageInScan} elapsed=${elapsedMs}ms`,
   );
 
   return {
@@ -201,7 +225,7 @@ export default defineLogicFunction({
   universalIdentifier: RECOMPUTE_COSTS_LOGIC_FUNCTION_UNIVERSAL_IDENTIFIER,
   name: 'recompute-costs',
   description:
-    'Recomputes callLog.cost for outbound rows using ZADARMA_RATE_PER_MINUTE / AI_RATE_PER_MINUTE × duration. Skip-if-unchanged keeps it cheap to re-run; idempotent. Inbound rows are always null (called party pays).',
+    'Recomputes callLog.cost for outbound rows using ZADARMA_RATE_PER_MINUTE / AI_RATE_PER_MINUTE × duration. Default body `{ onlyMissing: true }` pre-filters cost IS NULL so the operator-flow drains every legacy row efficiently (Twenty cursor pagination otherwise caps scan depth and leaves older nulls behind). Set `onlyMissing: false` to refresh every outbound row, e.g. after a rate change. Calls shorter than MIN_CHARGEABLE_DURATION_SECONDS (default 15) get cost=null. Inbound rows are always null.',
   timeoutSeconds: 300,
   handler,
   httpRouteTriggerSettings: {

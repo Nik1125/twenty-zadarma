@@ -20,6 +20,12 @@ export type CostRates = {
   zadarmaCurrency: string | null;
   aiRatePerMinute: number | null;
   aiCurrency: string | null;
+  // Calls shorter than this are not chargeable — `computeCallCostFromRate`
+  // returns null. Matches the typical telecom "minimum chargeable duration"
+  // convention so micro-short answered calls (misdials, immediate hang-up,
+  // quick verifications) don't show up as 0.01 PLN noise in dashboards.
+  // 0 = no threshold (every outbound call with duration > 0 gets a cost).
+  minChargeableDurationSeconds: number;
 };
 
 export type ComputeCostInput = {
@@ -49,20 +55,35 @@ const parseCurrency = (raw: string | undefined | null): string | null => {
   return c;
 };
 
-// Parses the four rate-related applicationVariables into a typed config.
-// Each pair (rate + currency) is independent — Zadarma rates can be set
+const DEFAULT_MIN_CHARGEABLE_DURATION_SECONDS = 15;
+
+const parseThreshold = (raw: string | undefined | null): number => {
+  if (raw === undefined || raw === null) return DEFAULT_MIN_CHARGEABLE_DURATION_SECONDS;
+  const trimmed = String(raw).trim();
+  if (!trimmed) return DEFAULT_MIN_CHARGEABLE_DURATION_SECONDS;
+  const n = Number(trimmed);
+  if (!Number.isFinite(n) || n < 0) return DEFAULT_MIN_CHARGEABLE_DURATION_SECONDS;
+  return Math.floor(n);
+};
+
+// Parses the rate-related applicationVariables into a typed config. Each
+// rate pair (rate + currency) is independent — Zadarma rates can be set
 // without AI rates and vice versa. A pair where either half is missing /
-// invalid is treated as "not configured" for that callerType bucket.
+// invalid is treated as "not configured" for that callerType bucket. The
+// min-chargeable threshold falls back to a 15s default when blank — short
+// answered calls then get cost=null, matching common operator billing.
 export const parseCostRatesFromEnv = (env: {
   ZADARMA_RATE_PER_MINUTE?: string;
   ZADARMA_RATE_CURRENCY?: string;
   AI_RATE_PER_MINUTE?: string;
   AI_RATE_CURRENCY?: string;
+  MIN_CHARGEABLE_DURATION_SECONDS?: string;
 }): CostRates => ({
   zadarmaRatePerMinute: parseRate(env.ZADARMA_RATE_PER_MINUTE),
   zadarmaCurrency: parseCurrency(env.ZADARMA_RATE_CURRENCY),
   aiRatePerMinute: parseRate(env.AI_RATE_PER_MINUTE),
   aiCurrency: parseCurrency(env.AI_RATE_CURRENCY),
+  minChargeableDurationSeconds: parseThreshold(env.MIN_CHARGEABLE_DURATION_SECONDS),
 });
 
 const toMicros = (decimal: number): number =>
@@ -78,6 +99,11 @@ export const computeCallCostFromRate = (
     !Number.isFinite(input.duration) ||
     input.duration <= 0
   ) {
+    return null;
+  }
+  if (input.duration < rates.minChargeableDurationSeconds) {
+    // Short calls (misdial, immediate hang-up) — operator policy: free.
+    // Setting MIN_CHARGEABLE_DURATION_SECONDS=0 disables this branch.
     return null;
   }
 

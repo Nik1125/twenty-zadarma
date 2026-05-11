@@ -6,6 +6,7 @@ import {
   ACTIVE_CALL_COOLDOWN_MINUTES_VARIABLE_UNIVERSAL_IDENTIFIER,
   AI_EXTENSIONS_VARIABLE_UNIVERSAL_IDENTIFIER,
   AI_RATE_CURRENCY_VARIABLE_UNIVERSAL_IDENTIFIER,
+  MIN_CHARGEABLE_DURATION_SECONDS_VARIABLE_UNIVERSAL_IDENTIFIER,
   AI_RATE_PER_MINUTE_VARIABLE_UNIVERSAL_IDENTIFIER,
   ZADARMA_AUTO_CREATE_PERSON_VARIABLE_UNIVERSAL_IDENTIFIER,
   TEAMSALE_BASE_URL_VARIABLE_UNIVERSAL_IDENTIFIER,
@@ -135,6 +136,19 @@ export default defineApplication({
       description:
         '[Manage in Custom tab] ISO 4217 currency code for the AI per-minute rate. Required when AI_RATE_PER_MINUTE is set.',
       value: '',
+    },
+    // Minimum chargeable call duration (seconds). Calls shorter than this
+    // get cost=null instead of a tiny proportional value — matches the
+    // typical operator billing convention that micro-short answered calls
+    // (misdial, immediate hang-up, voicemail beep) aren't charged. Set to
+    // 0 to disable the threshold and bill every outbound call with
+    // duration > 0. Default 15.
+    MIN_CHARGEABLE_DURATION_SECONDS: {
+      universalIdentifier:
+        MIN_CHARGEABLE_DURATION_SECONDS_VARIABLE_UNIVERSAL_IDENTIFIER,
+      description:
+        '[Manage in Custom tab] Minimum chargeable call duration (seconds). Calls shorter than this get cost=null. 0 disables the threshold. Default: 15.',
+      value: '15',
     },
     // Toggle for the inbound webhook auto-create-Person branch. When true,
     // a NOTIFY_END / NOTIFY_OUT_END event from a number that does not

@@ -12,6 +12,7 @@ const RATES: CostRates = {
   zadarmaCurrency: 'USD',
   aiRatePerMinute: 0.5,
   aiCurrency: 'USD',
+  minChargeableDurationSeconds: 0, // disabled in unit tests unless explicitly varied
 };
 
 describe('parseCostRatesFromEnv', () => {
@@ -22,28 +23,55 @@ describe('parseCostRatesFromEnv', () => {
         ZADARMA_RATE_CURRENCY: 'usd',
         AI_RATE_PER_MINUTE: '0.5',
         AI_RATE_CURRENCY: 'pln',
+        MIN_CHARGEABLE_DURATION_SECONDS: '30',
       }),
     ).toEqual({
       zadarmaRatePerMinute: 0.05,
       zadarmaCurrency: 'USD',
       aiRatePerMinute: 0.5,
       aiCurrency: 'PLN',
+      minChargeableDurationSeconds: 30,
     });
   });
 
-  it('treats missing / blank fields as null', () => {
+  it('treats missing / blank fields as null (rates) / default-15 (threshold)', () => {
     expect(parseCostRatesFromEnv({})).toEqual({
       zadarmaRatePerMinute: null,
       zadarmaCurrency: null,
       aiRatePerMinute: null,
       aiCurrency: null,
+      minChargeableDurationSeconds: 15,
     });
     expect(
       parseCostRatesFromEnv({
         ZADARMA_RATE_PER_MINUTE: '   ',
         ZADARMA_RATE_CURRENCY: '',
+        MIN_CHARGEABLE_DURATION_SECONDS: '',
       }),
-    ).toMatchObject({ zadarmaRatePerMinute: null, zadarmaCurrency: null });
+    ).toMatchObject({
+      zadarmaRatePerMinute: null,
+      zadarmaCurrency: null,
+      minChargeableDurationSeconds: 15,
+    });
+  });
+
+  it('threshold accepts integer-only seconds, floors fractions, falls back on invalid', () => {
+    expect(
+      parseCostRatesFromEnv({ MIN_CHARGEABLE_DURATION_SECONDS: '0' }).minChargeableDurationSeconds,
+    ).toBe(0);
+    expect(
+      parseCostRatesFromEnv({ MIN_CHARGEABLE_DURATION_SECONDS: '60' }).minChargeableDurationSeconds,
+    ).toBe(60);
+    expect(
+      parseCostRatesFromEnv({ MIN_CHARGEABLE_DURATION_SECONDS: '30.9' }).minChargeableDurationSeconds,
+    ).toBe(30);
+    // Negative / non-numeric → fall back to default 15.
+    expect(
+      parseCostRatesFromEnv({ MIN_CHARGEABLE_DURATION_SECONDS: '-5' }).minChargeableDurationSeconds,
+    ).toBe(15);
+    expect(
+      parseCostRatesFromEnv({ MIN_CHARGEABLE_DURATION_SECONDS: 'oops' }).minChargeableDurationSeconds,
+    ).toBe(15);
   });
 
   it('rejects negative rates and non-numeric strings', () => {
@@ -68,6 +96,72 @@ describe('parseCostRatesFromEnv', () => {
       zadarmaCurrency: null,
       aiCurrency: null,
     });
+  });
+});
+
+describe('computeCallCostFromRate min-chargeable threshold', () => {
+  const baseRates: CostRates = {
+    zadarmaRatePerMinute: 0.12,
+    zadarmaCurrency: 'PLN',
+    aiRatePerMinute: null,
+    aiCurrency: null,
+    minChargeableDurationSeconds: 15,
+  };
+
+  it('returns null when duration is below the threshold', () => {
+    expect(
+      computeCallCostFromRate(
+        { callType: 'OUT', callerType: 'HUMAN', duration: 3 },
+        baseRates,
+      ),
+    ).toBeNull();
+    expect(
+      computeCallCostFromRate(
+        { callType: 'OUT', callerType: 'HUMAN', duration: 14 },
+        baseRates,
+      ),
+    ).toBeNull();
+  });
+
+  it('returns cost when duration matches the threshold (inclusive)', () => {
+    expect(
+      computeCallCostFromRate(
+        { callType: 'OUT', callerType: 'HUMAN', duration: 15 },
+        baseRates,
+      ),
+    ).toEqual({ amountMicros: 30_000, currencyCode: 'PLN' });
+  });
+
+  it('returns cost for any duration > 0 when threshold is 0 (disabled)', () => {
+    const disabled: CostRates = { ...baseRates, minChargeableDurationSeconds: 0 };
+    expect(
+      computeCallCostFromRate(
+        { callType: 'OUT', callerType: 'HUMAN', duration: 3 },
+        disabled,
+      ),
+    ).toEqual({ amountMicros: 6_000, currencyCode: 'PLN' });
+  });
+
+  it('threshold applies to AI calls too', () => {
+    const aiOnly: CostRates = {
+      zadarmaRatePerMinute: null,
+      zadarmaCurrency: null,
+      aiRatePerMinute: 0.22,
+      aiCurrency: 'USD',
+      minChargeableDurationSeconds: 15,
+    };
+    expect(
+      computeCallCostFromRate(
+        { callType: 'OUT', callerType: 'AI', duration: 10 },
+        aiOnly,
+      ),
+    ).toBeNull();
+    expect(
+      computeCallCostFromRate(
+        { callType: 'OUT', callerType: 'AI', duration: 30 },
+        aiOnly,
+      ),
+    ).toEqual({ amountMicros: 110_000, currencyCode: 'USD' });
   });
 });
 
