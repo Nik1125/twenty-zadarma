@@ -14,6 +14,24 @@ export default definePageLayout({
   objectUniversalIdentifier: SMS_LOG_OBJECT_UNIVERSAL_IDENTIFIER,
   tabs: [
     {
+      // Home tab — same Fields-widget pattern as Call Log Record Page.
+      universalIdentifier: '7965dca5-871e-4d22-9b0c-2cff6f916efb',
+      title: 'Home',
+      position: 10,
+      icon: 'IconHome',
+      layoutMode: PageLayoutTabLayoutMode.VERTICAL_LIST,
+      widgets: [
+        {
+          universalIdentifier: '476c1a92-fc08-48b3-b46e-32c325180972',
+          title: 'Fields',
+          type: 'FIELDS',
+          gridPosition: { row: 0, column: 0, rowSpan: 12, columnSpan: 12 },
+          position: { layoutMode: PageLayoutTabLayoutMode.VERTICAL_LIST, index: 0 },
+          configuration: { configurationType: 'FIELDS' },
+        },
+      ],
+    },
+    {
       universalIdentifier: '830f3c95-c389-49e7-81a6-25d565025498',
       title: 'Timeline',
       position: 100,

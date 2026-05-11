@@ -17,6 +17,28 @@ export default definePageLayout({
   objectUniversalIdentifier: CALL_LOG_OBJECT_UNIVERSAL_IDENTIFIER,
   tabs: [
     {
+      // Home tab — surfaces every callLog field via the built-in FIELDS
+      // widget. Without it Twenty hides the default field-display panel
+      // operators rely on (transcript / recording / summary blocks).
+      // Standard Twenty objects use the same shape; see
+      // twenty-server/.../page-layout-config/standard-person-page-layout.config.ts.
+      universalIdentifier: 'adb3c4ee-6ec8-4efd-828a-f1683455677a',
+      title: 'Home',
+      position: 10,
+      icon: 'IconHome',
+      layoutMode: PageLayoutTabLayoutMode.VERTICAL_LIST,
+      widgets: [
+        {
+          universalIdentifier: 'aa603a9a-d543-4341-bac3-2240edbd137d',
+          title: 'Fields',
+          type: 'FIELDS',
+          gridPosition: { row: 0, column: 0, rowSpan: 12, columnSpan: 12 },
+          position: { layoutMode: PageLayoutTabLayoutMode.VERTICAL_LIST, index: 0 },
+          configuration: { configurationType: 'FIELDS' },
+        },
+      ],
+    },
+    {
       universalIdentifier: '379a9fef-5a50-45b4-8505-7ef551209919',
       title: 'Timeline',
       position: 100,
