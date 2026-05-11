@@ -33,11 +33,25 @@ describe('buildEnrichmentCurl', () => {
     });
     expect(body.data).toMatchObject({
       aiVendor: 'retell',
-      aiSentiment: 'NEUTRAL',
-      aiSuccessful: true,
       aiTransferred: false,
       aiCost: { amountMicros: 0, currencyCode: 'USD' },
+      // Universal (no ai prefix as of v0.25).
+      sentiment: 'NEUTRAL',
+      successful: true,
+      interestLevel: 4,
+      actionRequired: 'OPERATOR_TASK',
+      keyTopics: ['<topic_1>', 'objection:<reason>'],
+      // NEW v0.25 fields.
+      outcome: 'FOLLOWUP',
+      score: 4,
     });
+    // Legacy `ai*` keys should NOT appear — the helper steers users to the
+    // canonical form. The webhook still accepts them for back-compat.
+    expect(body.data).not.toHaveProperty('aiSentiment');
+    expect(body.data).not.toHaveProperty('aiSuccessful');
+    expect(body.data).not.toHaveProperty('aiInterestLevel');
+    expect(body.data).not.toHaveProperty('aiActionRequired');
+    expect(body.data).not.toHaveProperty('aiKeyTopics');
   });
 
   it('produces output that does not contain any double-single-quote pair (safe paste)', () => {

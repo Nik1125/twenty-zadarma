@@ -4,41 +4,47 @@ import { CoreApiClient } from 'twenty-client-sdk/core';
 
 import { CALL_ENRICHMENT_LOGIC_FUNCTION_UNIVERSAL_IDENTIFIER } from 'src/constants/universal-identifiers';
 import { formatMarkdownToBlocknote } from 'src/modules/shared/format-markdown-blocknote';
+import {
+  normaliseAction,
+  normaliseInterestLevel,
+  normaliseKeyFacts,
+  normaliseKeyTopics,
+  normaliseOutcome,
+  normaliseScore,
+  normaliseSentiment,
+  pickEnrichmentKey,
+} from 'src/modules/zadarma/utils/call-enrichment-normalisers';
 import { parseAiExtensions } from 'src/modules/zadarma/utils/parse-ai-extensions';
 import { resolveEnrichmentWindowSeconds } from 'src/modules/zadarma/utils/parse-enrichment-window';
 import { resolveCallLogMatch } from 'src/modules/zadarma/utils/resolve-call-log-match';
 
 // POST /zadarma/call-enrichment (Bearer)
 //
-// Vendor-agnostic enrichment endpoint. Receives a payload from any AI/CRM
-// post-call analysis adapter (Retell via n8n, Vapi, etc.), resolves the
-// matching callLog row, and updates structured AI metric fields on it.
+// Vendor-agnostic enrichment endpoint. Receives a payload from any
+// AI/CRM post-call analysis adapter (Retell via n8n, Vapi, manual LLM
+// pipelines, etc.), resolves the matching callLog row, and updates the
+// structured analysis fields on it.
 //
-// Schema as of v0.19.0: transcripts and summaries land directly on the
-// callLog rich-text fields (`aiTranscript`, `summary` (label "AI summary"))
-// and structured analysis lands on typed fields (`aiInterestLevel`,
-// `aiActionRequired`, `aiActionContext`, `aiKeyTopics`). The earlier
-// "vendor data goes to a linked Note" pattern has been retired — debug
-// dumps that don't fit the schema should not be persisted.
+// Schema as of v0.25.0: analysis fields are universal (no `ai` prefix)
+// because they apply equally to AI-handled and manager-handled calls.
+// `aiTranscript` / `aiVendor` / `aiAgentName` / `aiTransferred` / `aiCost`
+// stay AI-prefixed — those are intrinsically vendor-specific.
+//
+// Dual-key payload acceptance: the endpoint reads both the new universal
+// keys (`sentiment`, `interestLevel`, `actionRequired`, `actionContext`,
+// `keyTopics`, `successful`) AND the legacy `ai*`-prefixed keys
+// (`aiSentiment`, etc.) so adapters wired against v0.24 keep working
+// without an update. When both are present in the same request the
+// universal key wins; a one-shot deprecation warning logs the legacy
+// key the first time it is seen per process.
+//
+// New v0.25 fields: `outcome` (8-value generic enum), `score` (1-5 manager
+// performance, NULL = skipped), `scoreReason` (free-text justification or
+// `skipped: <reason>`), and `keyFacts` (structured `[{type,value}]` pairs
+// the Biography refresh workflow aggregates per Person).
 //
 // Idempotent: re-running with the same `match.correlationId` updates the
-// same row (no 409 — adapter retries are safe).
-//
-// Status codes:
-//   200 ok=true               match + update succeeded
-//   200 ok=false (matched:false) for diagnostic — n8n adapter retries on this
-//   400 invalid body shape
-
-type Sentiment = 'POSITIVE' | 'NEGATIVE' | 'NEUTRAL' | 'UNKNOWN';
-
-type AiActionRequired =
-  | 'NONE'
-  | 'SMS_FOLLOWUP'
-  | 'EMAIL_OFFER'
-  | 'CALLBACK'
-  | 'OPERATOR_TASK'
-  | 'HUMAN_TRANSFER'
-  | 'DO_NOT_CONTACT';
+// same row.
 
 type EnrichmentBody = {
   match?: {
@@ -51,69 +57,37 @@ type EnrichmentBody = {
     requireExtensions?: boolean;
   };
   data?: {
+    // Vendor-specific — no rename. Always written through as-is.
     aiVendor?: string;
     aiAgentName?: string;
-    aiSentiment?: string; // accepts case-insensitive — normalised below
-    aiSuccessful?: boolean;
     aiTransferred?: boolean;
     aiCost?: { amountMicros?: number; currencyCode?: string };
     correlationId?: string;
     aiTranscript?: string;
-    aiSummary?: string;
+    aiSummary?: string; // body field name (callLog column is `summary`)
     recordingUrl?: string;
+
+    // Universal analysis — accept new keys + legacy `ai*` keys for
+    // back-compat. New keys win when both present.
+    sentiment?: string;
+    aiSentiment?: string;
+    successful?: boolean;
+    aiSuccessful?: boolean;
+    interestLevel?: number;
     aiInterestLevel?: number;
-    aiActionRequired?: string; // case-insensitive, normalised below
+    actionRequired?: string;
+    aiActionRequired?: string;
+    actionContext?: string;
     aiActionContext?: string;
-    aiKeyTopics?: unknown; // expected string[] — normalised below
+    keyTopics?: unknown;
+    aiKeyTopics?: unknown;
+
+    // NEW v0.25 universal fields (no legacy alias).
+    outcome?: string;
+    score?: number;
+    scoreReason?: string;
+    keyFacts?: unknown;
   };
-};
-
-const SENTIMENT_VALUES: ReadonlySet<Sentiment> = new Set([
-  'POSITIVE',
-  'NEGATIVE',
-  'NEUTRAL',
-  'UNKNOWN',
-]);
-
-const AI_ACTION_VALUES: ReadonlySet<AiActionRequired> = new Set([
-  'NONE',
-  'SMS_FOLLOWUP',
-  'EMAIL_OFFER',
-  'CALLBACK',
-  'OPERATOR_TASK',
-  'HUMAN_TRANSFER',
-  'DO_NOT_CONTACT',
-]);
-
-const normaliseSentiment = (raw: string | undefined): Sentiment | null => {
-  if (!raw) return null;
-  const upper = raw.trim().toUpperCase();
-  return SENTIMENT_VALUES.has(upper as Sentiment) ? (upper as Sentiment) : null;
-};
-
-const normaliseAction = (raw: string | undefined): AiActionRequired | null => {
-  if (!raw) return null;
-  const upper = raw.trim().toUpperCase();
-  return AI_ACTION_VALUES.has(upper as AiActionRequired)
-    ? (upper as AiActionRequired)
-    : null;
-};
-
-const normaliseKeyTopics = (raw: unknown): string[] | null => {
-  if (!Array.isArray(raw)) return null;
-  const out = raw
-    .filter((v): v is string => typeof v === 'string')
-    .map((v) => v.trim())
-    .filter((v) => v.length > 0);
-  return out.length > 0 ? out : null;
-};
-
-const normaliseInterestLevel = (raw: unknown): number | null => {
-  if (typeof raw !== 'number' || !Number.isFinite(raw)) return null;
-  // Clamp into 1-5 range; round to integer. Out-of-range silently clamped
-  // rather than rejected so a stray 0/6 from the analyser doesn't drop the
-  // whole enrichment write.
-  return Math.max(1, Math.min(5, Math.round(raw)));
 };
 
 type EnrichmentResult = {
@@ -135,10 +109,7 @@ const handler = async (
   const match = body.match ?? {};
   const data = body.data ?? {};
 
-  if (
-    !match.correlationId &&
-    !match.toNumber
-  ) {
+  if (!match.correlationId && !match.toNumber) {
     return {
       ok: false,
       error: 'match.toNumber is required (or match.correlationId for idempotent re-runs)',
@@ -176,27 +147,27 @@ const handler = async (
 
   // Build update payload — only include fields the caller actually provided.
   const updateData: Record<string, unknown> = {};
+
+  // --- Vendor-specific (no rename, no dual-key) ---
   if (data.aiVendor !== undefined) updateData.aiVendor = data.aiVendor;
   if (data.aiAgentName !== undefined) updateData.aiAgentName = data.aiAgentName;
-  const sentiment = normaliseSentiment(data.aiSentiment);
-  if (sentiment) updateData.aiSentiment = sentiment;
-  if (typeof data.aiSuccessful === 'boolean') updateData.aiSuccessful = data.aiSuccessful;
-  if (typeof data.aiTransferred === 'boolean') updateData.aiTransferred = data.aiTransferred;
+  if (typeof data.aiTransferred === 'boolean') {
+    updateData.aiTransferred = data.aiTransferred;
+  }
   if (data.aiCost && typeof data.aiCost.amountMicros === 'number') {
     updateData.aiCost = {
       amountMicros: data.aiCost.amountMicros,
       currencyCode: data.aiCost.currencyCode ?? 'USD',
     };
   }
-  // correlationId — prefer explicit `data.correlationId`, else fall back to
-  // `match.correlationId` if provided (so adapters can pass it once).
+  // correlationId — prefer explicit `data.correlationId`, else fall back
+  // to `match.correlationId` so adapters can pass it once.
   const correlationId = data.correlationId ?? match.correlationId;
   if (correlationId) updateData.correlationId = correlationId;
-  // RICH_TEXT v2 fields take both `{ markdown, blocknote }`. Markdown alone
-  // renders as raw plaintext (visible `**` / `##`) until the operator
-  // manually edits the field — BlockNote only parses on input events. Wrap
-  // every string write through formatMarkdownToBlocknote so external
-  // adapters (n8n) don't have to know about this gotcha.
+  // RICH_TEXT v2 fields take both `{ markdown, blocknote }`. Markdown
+  // alone renders as raw plaintext (visible `**` / `##`) until the
+  // operator manually edits the field. Wrap every string write through
+  // formatMarkdownToBlocknote so external adapters don't have to know.
   if (typeof data.aiTranscript === 'string') {
     updateData.aiTranscript = formatMarkdownToBlocknote(data.aiTranscript);
   }
@@ -209,15 +180,80 @@ const handler = async (
       primaryLinkUrl: data.recordingUrl,
     };
   }
-  const interestLevel = normaliseInterestLevel(data.aiInterestLevel);
-  if (interestLevel !== null) updateData.aiInterestLevel = interestLevel;
-  const action = normaliseAction(data.aiActionRequired);
-  if (action) updateData.aiActionRequired = action;
-  if (typeof data.aiActionContext === 'string' && data.aiActionContext.trim().length > 0) {
-    updateData.aiActionContext = data.aiActionContext.trim();
+
+  // --- Universal (dual-key: new wins, legacy emits warning) ---
+  const sentimentRaw = pickEnrichmentKey(
+    data.sentiment,
+    data.aiSentiment,
+    'aiSentiment',
+    'sentiment',
+  );
+  const sentiment = normaliseSentiment(sentimentRaw);
+  if (sentiment) updateData.sentiment = sentiment;
+
+  const successfulRaw = pickEnrichmentKey(
+    data.successful,
+    data.aiSuccessful,
+    'aiSuccessful',
+    'successful',
+  );
+  if (typeof successfulRaw === 'boolean') {
+    updateData.successful = successfulRaw;
   }
-  const keyTopics = normaliseKeyTopics(data.aiKeyTopics);
-  if (keyTopics) updateData.aiKeyTopics = keyTopics;
+
+  const interestLevelRaw = pickEnrichmentKey(
+    data.interestLevel,
+    data.aiInterestLevel,
+    'aiInterestLevel',
+    'interestLevel',
+  );
+  const interestLevel = normaliseInterestLevel(interestLevelRaw);
+  if (interestLevel !== null) updateData.interestLevel = interestLevel;
+
+  const actionRaw = pickEnrichmentKey(
+    data.actionRequired,
+    data.aiActionRequired,
+    'aiActionRequired',
+    'actionRequired',
+  );
+  const action = normaliseAction(actionRaw);
+  if (action) updateData.actionRequired = action;
+
+  const actionContextRaw = pickEnrichmentKey(
+    data.actionContext,
+    data.aiActionContext,
+    'aiActionContext',
+    'actionContext',
+  );
+  if (
+    typeof actionContextRaw === 'string' &&
+    actionContextRaw.trim().length > 0
+  ) {
+    updateData.actionContext = actionContextRaw.trim();
+  }
+
+  const keyTopicsRaw = pickEnrichmentKey(
+    data.keyTopics,
+    data.aiKeyTopics,
+    'aiKeyTopics',
+    'keyTopics',
+  );
+  const keyTopics = normaliseKeyTopics(keyTopicsRaw);
+  if (keyTopics) updateData.keyTopics = keyTopics;
+
+  // --- NEW v0.25 fields (no legacy alias) ---
+  const outcome = normaliseOutcome(data.outcome);
+  if (outcome) updateData.outcome = outcome;
+
+  const score = normaliseScore(data.score);
+  if (score !== null) updateData.score = score;
+
+  if (typeof data.scoreReason === 'string' && data.scoreReason.trim().length > 0) {
+    updateData.scoreReason = data.scoreReason.trim();
+  }
+
+  const keyFacts = normaliseKeyFacts(data.keyFacts);
+  if (keyFacts) updateData.keyFacts = keyFacts;
 
   if (Object.keys(updateData).length === 0) {
     return {
@@ -257,7 +293,7 @@ export default defineLogicFunction({
   universalIdentifier: CALL_ENRICHMENT_LOGIC_FUNCTION_UNIVERSAL_IDENTIFIER,
   name: 'call-enrichment',
   description:
-    'Vendor-agnostic post-call enrichment: resolves a callLog by correlationId / phone+timestamp / recent fallback, updates AI metric fields. Idempotent. Designed for n8n adapters fronting Retell, Vapi, or any post-call analysis source.',
+    'Vendor-agnostic post-call enrichment: resolves a callLog by correlationId / phone+timestamp / recent fallback, updates structured analysis fields (sentiment, interestLevel, actionRequired, actionContext, keyTopics, successful, outcome, score, scoreReason, keyFacts, summary, aiTranscript, aiVendor, aiAgentName, aiTransferred, aiCost). Idempotent. Accepts both new (v0.25 universal) and legacy (v0.24 ai-prefixed) payload keys for graceful adapter migration.',
   timeoutSeconds: 30,
   handler,
   httpRouteTriggerSettings: {

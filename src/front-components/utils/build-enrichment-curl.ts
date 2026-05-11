@@ -16,19 +16,32 @@ export const buildEnrichmentCurl = (endpointUrl: string): string => {
       startTimestamp: '<start_timestamp_ms>',
     },
     data: {
+      // Vendor-specific (no rename).
       aiVendor: 'retell',
       aiAgentName: '<agent_name>',
-      aiSentiment: 'NEUTRAL',
-      aiSuccessful: true,
       aiTransferred: false,
       aiCost: { amountMicros: 0, currencyCode: 'USD' },
       aiSummary: '<summary>',
       aiTranscript: '<transcript>',
       recordingUrl: '<recording_url>',
-      aiInterestLevel: 4,
-      aiActionRequired: 'OPERATOR_TASK',
-      aiActionContext: '<action_context>',
-      aiKeyTopics: ['<topic_1>', 'objection:<reason>'],
+      // Universal analysis (no `ai` prefix as of v0.25). The endpoint
+      // also accepts legacy `aiSentiment` / `aiSuccessful` / `aiInterestLevel`
+      // / `aiActionRequired` / `aiActionContext` / `aiKeyTopics` for adapters
+      // wired against v0.24; the new key wins when both are present.
+      sentiment: 'NEUTRAL',
+      successful: true,
+      interestLevel: 4,
+      actionRequired: 'OPERATOR_TASK',
+      actionContext: '<action_context>',
+      keyTopics: ['<topic_1>', 'objection:<reason>'],
+      // NEW v0.25 universal analysis fields.
+      outcome: 'FOLLOWUP',
+      score: 4,
+      scoreReason: '<score_justification or "skipped: <reason>">',
+      keyFacts: [
+        { type: 'specialty', value: '<value>' },
+        { type: 'city', value: '<value>' },
+      ],
     },
   };
   // JSON.stringify outputs valid JSON with double-quoted keys/strings — pasteable
