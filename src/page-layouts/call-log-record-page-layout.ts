@@ -1,6 +1,7 @@
 import { definePageLayout, PageLayoutTabLayoutMode } from 'twenty-sdk/define';
 
 import { CALL_LOG_OBJECT_UNIVERSAL_IDENTIFIER } from 'src/objects/call-log.object';
+import { CALL_LOG_FIELDS_VIEW_UNIVERSAL_IDENTIFIER } from 'src/views/call-log-fields-view';
 
 // Twenty hides the "Customize record page" workspace UI for App-owned
 // objects unless the App ships an explicit RECORD_PAGE layout for that
@@ -34,7 +35,17 @@ export default definePageLayout({
           type: 'FIELDS',
           gridPosition: { row: 0, column: 0, rowSpan: 12, columnSpan: 12 },
           position: { layoutMode: PageLayoutTabLayoutMode.VERTICAL_LIST, index: 0 },
-          configuration: { configurationType: 'FIELDS' },
+          // Manifest configuration uses the universal form
+          // (`viewUniversalIdentifier`) which the server resolves to a
+          // viewId at install time. Plain `viewId: ...` in the manifest is
+          // ignored — verified empirically on twenty-sdk 2.3 (the view
+          // installs but the widget's configuration.viewId stays NULL,
+          // which then trips "Fields widget has no associated view" on the
+          // first operator customization save).
+          configuration: {
+            configurationType: 'FIELDS',
+            viewUniversalIdentifier: CALL_LOG_FIELDS_VIEW_UNIVERSAL_IDENTIFIER,
+          },
         },
       ],
     },

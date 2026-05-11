@@ -1,6 +1,7 @@
 import { definePageLayout, PageLayoutTabLayoutMode } from 'twenty-sdk/define';
 
 import { SMS_LOG_OBJECT_UNIVERSAL_IDENTIFIER } from 'src/objects/sms-log.object';
+import { SMS_LOG_FIELDS_VIEW_UNIVERSAL_IDENTIFIER } from 'src/views/sms-log-fields-view';
 
 // Same pattern as call-log-record-page-layout.ts: ships an explicit
 // RECORD_PAGE so Twenty surfaces the "Customize record page" workspace
@@ -27,7 +28,13 @@ export default definePageLayout({
           type: 'FIELDS',
           gridPosition: { row: 0, column: 0, rowSpan: 12, columnSpan: 12 },
           position: { layoutMode: PageLayoutTabLayoutMode.VERTICAL_LIST, index: 0 },
-          configuration: { configurationType: 'FIELDS' },
+          // Manifest configuration uses the universal form
+          // (`viewUniversalIdentifier`) — see call-log-record-page-layout.ts
+          // for the empirical note.
+          configuration: {
+            configurationType: 'FIELDS',
+            viewUniversalIdentifier: SMS_LOG_FIELDS_VIEW_UNIVERSAL_IDENTIFIER,
+          },
         },
       ],
     },
