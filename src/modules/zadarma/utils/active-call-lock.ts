@@ -32,8 +32,3 @@ export const resolveCooldownUntilIso = (nowMs: number = Date.now()): string =>
     nowMs,
     parseCooldownMinutes(process.env.ACTIVE_CALL_COOLDOWN_MINUTES),
   );
-
-// Cooldown duration in milliseconds — used as the setTimeout delay when the
-// webhook handler schedules an auto-clear of activeCallStatus back to IDLE.
-export const resolveCooldownMs = (): number =>
-  parseCooldownMinutes(process.env.ACTIVE_CALL_COOLDOWN_MINUTES) * 60_000;

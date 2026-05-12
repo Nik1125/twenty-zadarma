@@ -7,11 +7,7 @@ import {
   verifyZadarmaWebhook,
 } from 'src/modules/zadarma/connector/verify-webhook';
 import { signZadarmaRequest } from 'src/modules/zadarma/connector/sign-request';
-import {
-  resolveCooldownMs,
-  resolveCooldownUntilIso,
-} from 'src/modules/zadarma/utils/active-call-lock';
-import { clearCooldownIfUnchanged } from 'src/modules/zadarma/utils/clear-cooldown-if-unchanged';
+import { resolveCooldownUntilIso } from 'src/modules/zadarma/utils/active-call-lock';
 import { sweepStaleCooldowns } from 'src/modules/zadarma/utils/sweep-stale-cooldowns';
 import { deriveCallerType } from 'src/modules/zadarma/utils/derive-caller-type';
 import { findLatestOpportunityIdForPerson } from 'src/modules/zadarma/utils/find-latest-opportunity-id';
@@ -123,37 +119,27 @@ const writePersonCalling = async (
   });
 };
 
-// Sets COOLDOWN + schedules an auto-clear back to IDLE after the cooldown
-// window. The setTimeout lives in the Twenty server's Node event loop
-// (LOGIC_FUNCTION_TYPE=LOCAL); it survives the handler return because the
-// process is long-lived. On LAMBDA-mode runtimes the timer would be killed
-// when the function returns — this app is self-host LOCAL only.
+// Sets COOLDOWN + activeCallCooldownUntil. The actual flip back to IDLE
+// is handled by two complementary paths:
+//   1. sweep-stale-cooldowns-cron (canonical) — fires every minute via
+//      Twenty's cron worker, clears any expired cooldown across the
+//      workspace.
+//   2. sweepStaleCooldowns() at the top of handleNotifyEnd / handleNotifyStart
+//      (defense-in-depth) — instant recovery if a call lands while a
+//      cooldown is expiring, so we don't wait for the next minute boundary.
 //
-// Race-safety: the scheduled clear re-fetches the Person and only flips
-// IDLE if activeCallCooldownUntil still equals the value written here. A
-// new call that lands during the window writes a fresh cooldownUntil
-// (extending the lock) and queues its own setTimeout — the older one then
-// no-ops on mismatch. Manual operator status changes also no-op.
-//
-// Auth snapshot: TWENTY_APP_ACCESS_TOKEN is read at handler-context time
-// and captured in closure. The CoreApiClient SDK both reads from and
-// writes back to that env var on every request (token-refresh path on
-// line 466 of generated/index.ts), so concurrent webhooks would otherwise
-// overwrite the value before the deferred timer fires. By passing an
-// explicit `Authorization: Bearer <captured>` header into the deferred
-// client we sidestep cross-request env contention.
-//
-// Container restart caveat: a Coolify deploy / crash inside the cooldown
-// window drops pending timers, leaving the Person stuck in COOLDOWN. The
-// next webhook event for that Person is the recovery path — sweepStaleCooldowns
-// runs at the top of NOTIFY_END / NOTIFY_START and self-heals stuck rows.
+// We do NOT use setTimeout here. The Twenty App SDK's logic-function
+// runtime spawns a fresh node child-process per invocation and calls
+// process.exit(0) immediately after the handler resolves (see twenty-server
+// `local.driver.ts` writeBootstrapRunner) — any timer queued inside the
+// handler dies with the process. Cron is the only event-driven mechanism
+// the SDK exposes for deferred work.
 const writePersonCooldown = async (
   client: CoreApiClient,
   personId: string | null,
 ) => {
   if (!personId) return;
   const cooldownUntilIso = resolveCooldownUntilIso();
-  const cooldownMs = resolveCooldownMs();
   await client.mutation({
     updatePerson: {
       __args: {
@@ -166,40 +152,6 @@ const writePersonCooldown = async (
       id: true,
     },
   });
-  const capturedToken =
-    process.env.TWENTY_APP_ACCESS_TOKEN ?? process.env.TWENTY_API_KEY ?? null;
-  const capturedApiUrl = process.env.TWENTY_API_URL ?? '';
-  setTimeout(() => {
-    void (async () => {
-      try {
-        const deferredClient = new CoreApiClient({
-          url: `${capturedApiUrl}/graphql`,
-          headers: capturedToken
-            ? { Authorization: `Bearer ${capturedToken}` }
-            : {},
-        });
-        const result = await clearCooldownIfUnchanged(
-          deferredClient,
-          personId,
-          cooldownUntilIso,
-        );
-        if (result.cleared) {
-          console.log(
-            `[zadarma-pbx-webhook] cooldown auto-clear: personId=${personId} → IDLE`,
-          );
-        } else {
-          console.log(
-            `[zadarma-pbx-webhook] cooldown auto-clear skipped personId=${personId} reason=${result.reason}`,
-          );
-        }
-      } catch (err) {
-        console.error(
-          `[zadarma-pbx-webhook] cooldown auto-clear failed personId=${personId}:`,
-          err,
-        );
-      }
-    })();
-  }, cooldownMs);
 };
 
 const findCallLogIdByPbxCallId = async (
