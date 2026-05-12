@@ -34,13 +34,30 @@ type CallLogLookup = {
   recordingLabel: string | null;
 };
 
-const findCallLogByPbxCallId = async (
+// Matches by EITHER `pbxCallId` (e.g. "out_e8ddf618…") OR `callId`
+// (Asterisk channel id, e.g. "1778596794.4673400"). Zadarma's
+// SPEECH_RECOGNITION push webhook is inconsistent — sometimes it carries
+// `body.pbx_call_id` (matches our pbxCallId column), sometimes only
+// `body.call_id` (which is the Asterisk channel id stored in our
+// callId column). The polling endpoint `/v1/speech_recognition/?call_id=…`
+// always uses the Asterisk id. We accept both id flavours so a push
+// payload of either shape lands on the right callLog.
+const findCallLogByEventId = async (
   client: CoreApiClient,
-  pbxCallId: string,
+  candidateIds: string[],
 ): Promise<CallLogLookup | null> => {
+  const ids = candidateIds.filter((id) => typeof id === 'string' && id.length > 0);
+  if (ids.length === 0) return null;
   const res = (await client.query({
     callLogs: {
-      __args: { filter: { pbxCallId: { eq: pbxCallId } } },
+      __args: {
+        filter: {
+          or: [
+            { pbxCallId: { in: ids } },
+            { callId: { in: ids } },
+          ],
+        },
+      },
       edges: {
         node: {
           id: true,
@@ -78,33 +95,42 @@ const findCallLogByPbxCallId = async (
 // accordingly so RICH_TEXT renders as a readable dialog.
 
 const handleSpeechRecognition = async (body: ZadarmaEventPayload & Record<string, unknown>) => {
-  const pbxCallId = body.pbx_call_id ?? body.call_id;
+  // Zadarma SR push payload may include `pbx_call_id` (matches our
+  // pbxCallId column), `call_id` (Asterisk channel id stored in our
+  // callId column), or — observed empirically — only one of the two.
+  // Collect every candidate so the lookup tries both columns.
+  const pbxCallIdRaw = typeof body.pbx_call_id === 'string' ? body.pbx_call_id : null;
+  const callIdRaw = typeof body.call_id === 'string' ? body.call_id : null;
+  const lookupIds = [pbxCallIdRaw, callIdRaw].filter(
+    (v): v is string => typeof v === 'string' && v.length > 0,
+  );
   console.log(
     `[zadarma-event-webhook] SPEECH_RECOGNITION raw body: ${JSON.stringify(body)}`,
   );
-  const turns = pbxCallId
-    ? extractDialogTurns((body as Record<string, unknown>).result)
-    : null;
+  const turns =
+    lookupIds.length > 0
+      ? extractDialogTurns((body as Record<string, unknown>).result)
+      : null;
 
-  if (!pbxCallId || !turns || turns.length === 0) {
+  if (lookupIds.length === 0 || !turns || turns.length === 0) {
     console.warn(
-      `[zadarma-event-webhook] SPEECH_RECOGNITION missing pbx_call_id (${pbxCallId}) or empty turns (${turns?.length ?? 'null'})`,
+      `[zadarma-event-webhook] SPEECH_RECOGNITION missing pbx_call_id+call_id (pbx=${pbxCallIdRaw}, call=${callIdRaw}) or empty turns (${turns?.length ?? 'null'})`,
     );
-    return { ok: false, error: 'missing pbx_call_id or empty turns' };
+    return { ok: false, error: 'missing pbx_call_id+call_id or empty turns' };
   }
 
   const client = new CoreApiClient();
-  const callLog = await findCallLogByPbxCallId(client, pbxCallId);
+  const callLog = await findCallLogByEventId(client, lookupIds);
   if (!callLog) {
     console.warn(
-      `[zadarma-event-webhook] SPEECH_RECOGNITION: no callLog for pbx_call_id=${pbxCallId} yet`,
+      `[zadarma-event-webhook] SPEECH_RECOGNITION: no callLog matched (pbx=${pbxCallIdRaw}, call=${callIdRaw})`,
     );
     return { ok: false, error: 'callLog not found' };
   }
 
   const { markdown, blocknote } = formatTranscript({
     turns,
-    pbxCallId,
+    pbxCallId: pbxCallIdRaw ?? callIdRaw ?? '',
   });
 
   await client.mutation({
