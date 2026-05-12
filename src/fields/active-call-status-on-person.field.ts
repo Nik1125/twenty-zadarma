@@ -9,10 +9,10 @@ import { ACTIVE_CALL_STATUS_FIELD_UNIVERSAL_IDENTIFIER } from 'src/constants/uni
 // Live state-machine field. Written by the PBX webhook handler:
 //   NOTIFY_START / NOTIFY_OUT_START / NOTIFY_INTERNAL → 'CALLING'
 //   NOTIFY_END / NOTIFY_OUT_END                       → 'COOLDOWN' (+ activeCallCooldownUntil)
+//   sweepStaleCooldowns / clearCooldownIfUnchanged    → 'IDLE'
 // Consumers (n8n flows, Retell agents, future click-to-call button, additional
 // human operators) read this to avoid concurrent dials. App never enforces
-// the lock — it only publishes the signal. Existing Persons keep null which
-// consumers must treat as 'IDLE' (no recorded call activity yet).
+// the lock — it only publishes the signal.
 // Twenty constrains SELECT option `value` to UPPER_SNAKE_CASE — labels are
 // shown in the UI, values are what consumers compare against.
 export default defineField({
@@ -30,8 +30,14 @@ export default defineField({
     { position: 1, label: 'Calling', value: 'CALLING', color: 'green' },
     { position: 2, label: 'Cooldown', value: 'COOLDOWN', color: 'yellow' },
   ],
-  // No defaultValue — both existing and new Persons start at NULL. Consumers
-  // (n8n / Retell / future click-to-call button) treat NULL as effectively
-  // 'IDLE'. The webhook handler writes 'CALLING' / 'COOLDOWN' explicitly.
+  // Default = IDLE so newly-created Persons render with the explicit "free to
+  // dial" label instead of an empty cell, and so consumers reading the field
+  // never have to handle NULL as a fourth implicit state. Manually setting
+  // the default in the workspace UI works once but is reset by every App
+  // upgrade (manifest migration overrides workspace-level defaults), so the
+  // value must live in the App schema. Existing rows with NULL stay NULL —
+  // Postgres ALTER COLUMN SET DEFAULT does not back-fill — that's why we
+  // also keep sweepStaleCooldowns() as the runtime self-heal.
+  defaultValue: "'IDLE'",
   isNullable: true,
 });
