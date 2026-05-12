@@ -7,7 +7,11 @@ import {
   verifyZadarmaWebhook,
 } from 'src/modules/zadarma/connector/verify-webhook';
 import { signZadarmaRequest } from 'src/modules/zadarma/connector/sign-request';
-import { resolveCooldownUntilIso } from 'src/modules/zadarma/utils/active-call-lock';
+import {
+  resolveCooldownMs,
+  resolveCooldownUntilIso,
+} from 'src/modules/zadarma/utils/active-call-lock';
+import { clearCooldownIfUnchanged } from 'src/modules/zadarma/utils/clear-cooldown-if-unchanged';
 import { deriveCallerType } from 'src/modules/zadarma/utils/derive-caller-type';
 import { findLatestOpportunityIdForPerson } from 'src/modules/zadarma/utils/find-latest-opportunity-id';
 import { findPersonIdByClientNumber } from 'src/modules/zadarma/utils/find-person-by-phone';
@@ -118,23 +122,66 @@ const writePersonCalling = async (
   });
 };
 
+// Sets COOLDOWN + schedules an auto-clear back to IDLE after the cooldown
+// window. The setTimeout lives in the Twenty server's Node event loop
+// (LOGIC_FUNCTION_TYPE=LOCAL); it survives the handler return because the
+// process is long-lived. On LAMBDA-mode runtimes the timer would be killed
+// when the function returns — this app is self-host LOCAL only.
+//
+// Race-safety: the scheduled clear re-fetches the Person and only flips
+// IDLE if activeCallCooldownUntil still equals the value written here. A
+// new call that lands during the window writes a fresh cooldownUntil
+// (extending the lock) and queues its own setTimeout — the older one then
+// no-ops on mismatch. Manual operator status changes also no-op.
+//
+// Container restart caveat: a Coolify deploy / crash inside the cooldown
+// window drops pending timers, leaving the Person stuck in COOLDOWN. The
+// next webhook event for that Person is the recovery path (a fresh
+// CALLING/COOLDOWN cycle resets the timer).
 const writePersonCooldown = async (
   client: CoreApiClient,
   personId: string | null,
 ) => {
   if (!personId) return;
+  const cooldownUntilIso = resolveCooldownUntilIso();
+  const cooldownMs = resolveCooldownMs();
   await client.mutation({
     updatePerson: {
       __args: {
         id: personId,
         data: {
           activeCallStatus: 'COOLDOWN',
-          activeCallCooldownUntil: resolveCooldownUntilIso(),
+          activeCallCooldownUntil: cooldownUntilIso,
         },
       },
       id: true,
     },
   });
+  setTimeout(() => {
+    void (async () => {
+      try {
+        const result = await clearCooldownIfUnchanged(
+          new CoreApiClient(),
+          personId,
+          cooldownUntilIso,
+        );
+        if (result.cleared) {
+          console.log(
+            `[zadarma-pbx-webhook] cooldown auto-clear: personId=${personId} → IDLE`,
+          );
+        } else {
+          console.log(
+            `[zadarma-pbx-webhook] cooldown auto-clear skipped personId=${personId} reason=${result.reason}`,
+          );
+        }
+      } catch (err) {
+        console.error(
+          `[zadarma-pbx-webhook] cooldown auto-clear failed personId=${personId}:`,
+          err,
+        );
+      }
+    })();
+  }, cooldownMs);
 };
 
 const findCallLogIdByPbxCallId = async (
