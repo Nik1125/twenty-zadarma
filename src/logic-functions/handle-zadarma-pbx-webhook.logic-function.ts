@@ -8,6 +8,10 @@ import {
 } from 'src/modules/zadarma/connector/verify-webhook';
 import { signZadarmaRequest } from 'src/modules/zadarma/connector/sign-request';
 import { resolveCooldownUntilIso } from 'src/modules/zadarma/utils/active-call-lock';
+import {
+  computeCallCostFromRate,
+  parseCostRatesFromEnv,
+} from 'src/modules/zadarma/utils/compute-call-cost-from-rate';
 import { sweepStaleCooldowns } from 'src/modules/zadarma/utils/sweep-stale-cooldowns';
 import { deriveCallerType } from 'src/modules/zadarma/utils/derive-caller-type';
 import { findLatestOpportunityIdForPerson } from 'src/modules/zadarma/utils/find-latest-opportunity-id';
@@ -241,6 +245,15 @@ const handleNotifyEnd = async (body: ZadarmaPbxEvent & Record<string, unknown>) 
     body.internal,
     parseAiExtensions(process.env.AI_EXTENSIONS),
   );
+  // Cost = rate × duration, computed at insert/update so the column is live
+  // without waiting for the operator to click Settings → Recompute. Returns
+  // null for inbound (called party pays), short calls (< MIN_CHARGEABLE),
+  // or when no rate is configured — matches the recompute endpoint's logic.
+  const rates = parseCostRatesFromEnv(process.env);
+  const cost = computeCallCostFromRate(
+    { callType, callerType, duration: duration ?? 0 },
+    rates,
+  );
 
   if (existingId) {
     await client.mutation({
@@ -253,6 +266,7 @@ const handleNotifyEnd = async (body: ZadarmaPbxEvent & Record<string, unknown>) 
             internalExtension: body.internal || null,
             callerType,
             ...(personId ? { personId } : {}),
+            ...(cost ? { cost } : {}),
           },
         },
         id: true,
@@ -260,7 +274,7 @@ const handleNotifyEnd = async (body: ZadarmaPbxEvent & Record<string, unknown>) 
     });
     await writePersonCooldown(client, personId);
     console.log(
-      `[zadarma-pbx-webhook] NOTIFY_END pbx=${pbxCallId} type=${callType} client=${clientNumber} dur=${duration} updated existing=${existingId} personId=${personId}`,
+      `[zadarma-pbx-webhook] NOTIFY_END pbx=${pbxCallId} type=${callType} client=${clientNumber} dur=${duration} cost=${cost ? `${cost.amountMicros}μ${cost.currencyCode}` : 'null'} updated existing=${existingId} personId=${personId}`,
     );
     return { ok: true, action: 'updated', callLogId: existingId, personId };
   }
@@ -286,6 +300,7 @@ const handleNotifyEnd = async (body: ZadarmaPbxEvent & Record<string, unknown>) 
           callerType,
           personId,
           ...(opportunityId ? { opportunityId } : {}),
+          ...(cost ? { cost } : {}),
         },
       },
       id: true,
@@ -294,7 +309,7 @@ const handleNotifyEnd = async (body: ZadarmaPbxEvent & Record<string, unknown>) 
   const callLogId = created.createCallLog?.id;
   await writePersonCooldown(client, personId);
   console.log(
-    `[zadarma-pbx-webhook] NOTIFY_END pbx=${pbxCallId} type=${callType} client=${clientNumber} dur=${duration} created=${callLogId} personId=${personId} opportunityId=${opportunityId ?? '-'}`,
+    `[zadarma-pbx-webhook] NOTIFY_END pbx=${pbxCallId} type=${callType} client=${clientNumber} dur=${duration} cost=${cost ? `${cost.amountMicros}μ${cost.currencyCode}` : 'null'} created=${callLogId} personId=${personId} opportunityId=${opportunityId ?? '-'}`,
   );
   return { ok: true, action: 'created', callLogId, personId, opportunityId, matched: personId !== null };
 };
