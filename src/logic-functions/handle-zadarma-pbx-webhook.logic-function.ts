@@ -12,6 +12,7 @@ import {
   resolveCooldownUntilIso,
 } from 'src/modules/zadarma/utils/active-call-lock';
 import { clearCooldownIfUnchanged } from 'src/modules/zadarma/utils/clear-cooldown-if-unchanged';
+import { sweepStaleCooldowns } from 'src/modules/zadarma/utils/sweep-stale-cooldowns';
 import { deriveCallerType } from 'src/modules/zadarma/utils/derive-caller-type';
 import { findLatestOpportunityIdForPerson } from 'src/modules/zadarma/utils/find-latest-opportunity-id';
 import { findPersonIdByClientNumber } from 'src/modules/zadarma/utils/find-person-by-phone';
@@ -134,10 +135,18 @@ const writePersonCalling = async (
 // (extending the lock) and queues its own setTimeout — the older one then
 // no-ops on mismatch. Manual operator status changes also no-op.
 //
+// Auth snapshot: TWENTY_APP_ACCESS_TOKEN is read at handler-context time
+// and captured in closure. The CoreApiClient SDK both reads from and
+// writes back to that env var on every request (token-refresh path on
+// line 466 of generated/index.ts), so concurrent webhooks would otherwise
+// overwrite the value before the deferred timer fires. By passing an
+// explicit `Authorization: Bearer <captured>` header into the deferred
+// client we sidestep cross-request env contention.
+//
 // Container restart caveat: a Coolify deploy / crash inside the cooldown
 // window drops pending timers, leaving the Person stuck in COOLDOWN. The
-// next webhook event for that Person is the recovery path (a fresh
-// CALLING/COOLDOWN cycle resets the timer).
+// next webhook event for that Person is the recovery path — sweepStaleCooldowns
+// runs at the top of NOTIFY_END / NOTIFY_START and self-heals stuck rows.
 const writePersonCooldown = async (
   client: CoreApiClient,
   personId: string | null,
@@ -157,11 +166,20 @@ const writePersonCooldown = async (
       id: true,
     },
   });
+  const capturedToken =
+    process.env.TWENTY_APP_ACCESS_TOKEN ?? process.env.TWENTY_API_KEY ?? null;
+  const capturedApiUrl = process.env.TWENTY_API_URL ?? '';
   setTimeout(() => {
     void (async () => {
       try {
+        const deferredClient = new CoreApiClient({
+          url: `${capturedApiUrl}/graphql`,
+          headers: capturedToken
+            ? { Authorization: `Bearer ${capturedToken}` }
+            : {},
+        });
         const result = await clearCooldownIfUnchanged(
-          new CoreApiClient(),
+          deferredClient,
           personId,
           cooldownUntilIso,
         );
@@ -213,6 +231,12 @@ const handleNotifyEnd = async (body: ZadarmaPbxEvent & Record<string, unknown>) 
   const ourNumber = callType === 'IN' ? calledNumber : callerNumber;
 
   const client = new CoreApiClient();
+  // Safety net for stuck COOLDOWN rows whose deferred setTimeout never fired
+  // (container restart, expired token in detached callback, etc). Self-heals
+  // by sweeping any Person where activeCallCooldownUntil < now back to IDLE.
+  // Best-effort — internal errors are swallowed; never blocks the primary
+  // webhook flow.
+  await sweepStaleCooldowns(client);
 
   let personId: string | null = null;
   if (clientNumber) {
@@ -343,6 +367,7 @@ const handleNotifyStart = async (body: ZadarmaPbxEvent & Record<string, unknown>
   }
 
   const client = new CoreApiClient();
+  await sweepStaleCooldowns(client);
   const personId = await findPersonIdByClientNumber(client, clientNumber);
   if (!personId) {
     console.log(
