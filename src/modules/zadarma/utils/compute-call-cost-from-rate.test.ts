@@ -162,15 +162,63 @@ describe('computeCallCostFromRate min-chargeable threshold', () => {
         aiOnly,
       ),
     ).toEqual({ amountMicros: 110_000, currencyCode: 'USD' });
+    // Threshold applies to inbound AI too (Retell still charges, but we honour
+    // the operator's "don't bill micro-short calls" policy uniformly).
+    expect(
+      computeCallCostFromRate(
+        { callType: 'IN', callerType: 'AI', duration: 10 },
+        aiOnly,
+      ),
+    ).toBeNull();
+    expect(
+      computeCallCostFromRate(
+        { callType: 'IN', callerType: 'AI', duration: 30 },
+        aiOnly,
+      ),
+    ).toEqual({ amountMicros: 110_000, currencyCode: 'USD' });
   });
 });
 
 describe('computeCallCostFromRate', () => {
-  it('returns null for inbound calls regardless of rates', () => {
+  it('returns null for inbound HUMAN calls (called party pays)', () => {
     expect(
       computeCallCostFromRate(
         { callType: 'IN', callerType: 'HUMAN', duration: 600 },
         RATES,
+      ),
+    ).toBeNull();
+  });
+
+  it('returns null for inbound UNKNOWN calls (no agent answered → no agent cost)', () => {
+    expect(
+      computeCallCostFromRate(
+        { callType: 'IN', callerType: 'UNKNOWN', duration: 600 },
+        RATES,
+      ),
+    ).toBeNull();
+  });
+
+  it('uses AI rate for callerType=AI on inbound (agent bills regardless of direction)', () => {
+    expect(
+      computeCallCostFromRate(
+        { callType: 'IN', callerType: 'AI', duration: 60 },
+        RATES,
+      ),
+    ).toEqual({ amountMicros: 500_000, currencyCode: 'USD' });
+  });
+
+  it('returns null for inbound AI when AI rate is not configured (no Zadarma fallback for inbound)', () => {
+    const aiUnset: CostRates = {
+      zadarmaRatePerMinute: 0.05,
+      zadarmaCurrency: 'USD',
+      aiRatePerMinute: null,
+      aiCurrency: null,
+      minChargeableDurationSeconds: 0,
+    };
+    expect(
+      computeCallCostFromRate(
+        { callType: 'IN', callerType: 'AI', duration: 60 },
+        aiUnset,
       ),
     ).toBeNull();
   });

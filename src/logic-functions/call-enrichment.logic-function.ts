@@ -110,10 +110,11 @@ const handler = async (
   const match = body.match ?? {};
   const data = body.data ?? {};
 
-  if (!match.correlationId && !match.toNumber) {
+  if (!match.correlationId && !match.toNumber && !match.fromNumber) {
     return {
       ok: false,
-      error: 'match.toNumber is required (or match.correlationId for idempotent re-runs)',
+      error:
+        'match.toNumber or match.fromNumber is required (or match.correlationId for idempotent re-runs)',
     };
   }
 

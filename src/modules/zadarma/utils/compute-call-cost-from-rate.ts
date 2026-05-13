@@ -4,10 +4,15 @@
 // AI_RATE_PER_MINUTE / AI_RATE_CURRENCY plus the per-row callType /
 // callerType / duration.
 //
-// Decision tree:
-//   inbound (callType=IN)            → null (called party pays)
+// Decision tree (evaluated top-down):
 //   AI call & AI rate set            → (duration / 60) × AI rate, AI currency
-//   any other outbound & Zadarma rate set → (duration / 60) × Zadarma rate
+//                                      Direction-agnostic: AI agents bill for
+//                                      handle time whether the call was
+//                                      inbound (Retell answered our DID) or
+//                                      outbound (Retell dialled out).
+//   inbound (callType=IN) & non-AI   → null (called party pays — Zadarma
+//                                      inbound is free for typical PL DIDs)
+//   outbound & Zadarma rate set      → (duration / 60) × Zadarma rate
 //   anything else                    → null (rate not configured / unparseable)
 //
 // Cost is stored in Twenty's CURRENCY field shape (`amountMicros` integer +
@@ -93,7 +98,6 @@ export const computeCallCostFromRate = (
   input: ComputeCostInput,
   rates: CostRates,
 ): ComputedCost | null => {
-  if (input.callType !== 'OUT') return null;
   if (
     typeof input.duration !== 'number' ||
     !Number.isFinite(input.duration) ||
@@ -107,6 +111,10 @@ export const computeCallCostFromRate = (
     return null;
   }
 
+  // AI calls bill regardless of direction: Retell (and similar) charge for
+  // agent handle time whether the agent answered an inbound call or dialled
+  // out. Evaluated before the IN-guard so AI inbound rows get a non-null
+  // cost.
   const useAi =
     input.callerType === 'AI' &&
     rates.aiRatePerMinute !== null &&
@@ -118,6 +126,9 @@ export const computeCallCostFromRate = (
       currencyCode: rates.aiCurrency as string,
     };
   }
+
+  // Non-AI inbound is free on the typical Zadarma plan (called party pays).
+  if (input.callType !== 'OUT') return null;
 
   if (
     rates.zadarmaRatePerMinute !== null &&

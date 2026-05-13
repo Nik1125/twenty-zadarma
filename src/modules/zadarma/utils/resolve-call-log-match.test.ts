@@ -14,10 +14,12 @@ type CandidateRow = {
   internalExtension?: string | null;
 };
 
+type FuzzyRow = CandidateRow & { clientNumber?: string };
+
 // Minimal CoreApiClient stub: just `query`. Tests build per-case responses.
 const buildClientStub = (
   byCorrelationId: Map<string, CandidateRow[]>,
-  fuzzyCandidates: CandidateRow[],
+  fuzzyCandidates: FuzzyRow[],
 ) => {
   const query = vi.fn(async (q: Record<string, unknown>) => {
     const callLogs = q.callLogs as { __args?: { filter?: Record<string, { eq?: string; is?: string; in?: string[] }> } };
@@ -28,8 +30,20 @@ const buildClientStub = (
         callLogs: { edges: rows.map((r) => ({ node: r })) },
       };
     }
-    // Fuzzy path — apply internalExtension.in filter if present.
+    // Fuzzy path — emulate `clientNumber: { in: [...] }` on the test fixture.
+    // Rows without a `clientNumber` field are treated as wildcard matches so
+    // existing tests (which don't populate it) keep passing.
     let rows = fuzzyCandidates;
+    if (
+      'clientNumber' in filter &&
+      Array.isArray(filter.clientNumber.in) &&
+      filter.clientNumber.in.length > 0
+    ) {
+      const allowed = new Set(filter.clientNumber.in);
+      rows = rows.filter(
+        (r) => r.clientNumber === undefined || allowed.has(r.clientNumber),
+      );
+    }
     if ('internalExtension' in filter && Array.isArray(filter.internalExtension.in)) {
       const allowed = new Set(filter.internalExtension.in);
       rows = rows.filter((r) => r.internalExtension && allowed.has(r.internalExtension));
@@ -186,16 +200,80 @@ describe('resolveCallLogMatch', () => {
     }
   });
 
-  it('returns matched:false when toNumber missing for fuzzy', async () => {
+  it('returns matched:false when both toNumber and fromNumber missing for fuzzy', async () => {
     const client = buildClientStub(new Map(), []);
     const out = await resolveCallLogMatch(client as never, {
       ...baseInput,
       toNumber: undefined,
+      fromNumber: undefined,
       startTimestamp: Date.UTC(2026, 4, 4, 11, 11, 14),
     });
     expect(out.matched).toBe(false);
     if (!out.matched) {
-      expect(out.reason).toContain('toNumber is required');
+      expect(out.reason).toContain('required for fuzzy match');
+    }
+  });
+
+  it('strategy 2: matches inbound by fromNumber (Retell sends our DID as toNumber)', async () => {
+    // For a Retell-handled inbound:
+    //   match.toNumber   = our DID (+48573580808)        ← does NOT equal callLog.clientNumber
+    //   match.fromNumber = client phone (+48539923725)   ← matches callLog.clientNumber
+    // The OR-match on clientNumber lets us land on the right row.
+    const startMs = Date.UTC(2026, 4, 4, 11, 11, 0);
+    const client = buildClientStub(
+      new Map(),
+      [
+        {
+          id: 'cl-inbound',
+          callStart: '2026-05-04T11:11:02.000Z',
+          correlationId: null,
+          clientNumber: '48539923725',
+        },
+      ],
+    );
+    const out = await resolveCallLogMatch(client as never, {
+      ...baseInput,
+      toNumber: '+48573580808',     // our DID — Retell's `to_number`
+      fromNumber: '+48539923725',   // client phone — Retell's `from_number`
+      startTimestamp: startMs,
+    });
+    expect(out.matched).toBe(true);
+    if (out.matched) {
+      expect(out.callLogId).toBe('cl-inbound');
+      expect(out.matchedBy).toBe('time-window-start');
+    }
+  });
+
+  it('strategy 2: filters out rows whose clientNumber is neither party', async () => {
+    const startMs = Date.UTC(2026, 4, 4, 11, 11, 0);
+    const client = buildClientStub(
+      new Map(),
+      [
+        // Decoy: clientNumber doesn't match either to/from — must NOT pick.
+        {
+          id: 'cl-other',
+          callStart: '2026-05-04T11:11:02.000Z',
+          correlationId: null,
+          clientNumber: '48999999999',
+        },
+        // Real candidate matching fromNumber.
+        {
+          id: 'cl-real',
+          callStart: '2026-05-04T11:11:05.000Z',
+          correlationId: null,
+          clientNumber: '48539923725',
+        },
+      ],
+    );
+    const out = await resolveCallLogMatch(client as never, {
+      ...baseInput,
+      toNumber: '+48573580808',
+      fromNumber: '+48539923725',
+      startTimestamp: startMs,
+    });
+    expect(out.matched).toBe(true);
+    if (out.matched) {
+      expect(out.callLogId).toBe('cl-real');
     }
   });
 

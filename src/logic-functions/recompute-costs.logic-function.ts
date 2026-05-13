@@ -9,10 +9,12 @@ import {
   parseCostRatesFromEnv,
 } from 'src/modules/zadarma/utils/compute-call-cost-from-rate';
 
-// Recomputes `callLog.cost` for every outbound row using the current
+// Recomputes `callLog.cost` for every chargeable row using the current
 // rate-per-minute applicationVariables (ZADARMA_RATE_PER_MINUTE,
 // ZADARMA_RATE_CURRENCY, AI_RATE_PER_MINUTE, AI_RATE_CURRENCY) ×
-// `duration / 60`. Inbound rows keep cost=null (the called party pays).
+// `duration / 60`. Outbound rows + AI-handled inbound rows are chargeable;
+// non-AI inbound rows keep cost=null (the called party pays on Zadarma's
+// inbound side, and there is no agent cost to bill).
 //
 // Idempotent: skip-if-unchanged means re-running is cheap and the only
 // rows touched are those whose stored cost actually differs from the new
@@ -109,9 +111,9 @@ const handler = async (
   let after: string | null | undefined = undefined;
   let hasNextPageInScan = true;
 
-  // Page newest-first through OUT rows. We pick at most `limit` rows that
-  // need a write (computed cost differs from stored). The first page that
-  // doesn't fill the picker is good enough — we don't try to paginate
+  // Page newest-first through chargeable rows. We pick at most `limit` rows
+  // that need a write (computed cost differs from stored). The first page
+  // that doesn't fill the picker is good enough — we don't try to paginate
   // until we hit `limit`, since rate changes typically affect every row
   // and the picker fills on the first page anyway.
   while (candidates.length < limit && hasNextPageInScan) {
@@ -125,7 +127,14 @@ const handler = async (
     // scan walks ONLY rows that should have a non-null cost, so the
     // ones we already wrote stamp out of the universe and the residual
     // shrinks monotonically to zero.
-    const baseFilter: Record<string, unknown> = { callType: { eq: 'OUT' } };
+    //
+    // No callType pre-filter: AI-handled inbound rows are chargeable too
+    // (Retell bills agent time regardless of direction), so we must scan
+    // both directions. Non-chargeable rows (IN + HUMAN/UNKNOWN) get
+    // computeCallCostFromRate=null → costsEqual(null,null)=true →
+    // unchanged → no write, so the extra scan cost is paid only in
+    // pagination, not in mutations.
+    const baseFilter: Record<string, unknown> = {};
     if (onlyMissing) {
       baseFilter.cost = { amountMicros: { is: 'NULL' } };
       if (rates.minChargeableDurationSeconds > 0) {
@@ -258,7 +267,7 @@ export default defineLogicFunction({
   universalIdentifier: RECOMPUTE_COSTS_LOGIC_FUNCTION_UNIVERSAL_IDENTIFIER,
   name: 'recompute-costs',
   description:
-    'Recomputes callLog.cost for outbound rows using ZADARMA_RATE_PER_MINUTE / AI_RATE_PER_MINUTE × duration. Default body `{ onlyMissing: true }` pre-filters cost IS NULL. Optional `{ fromIso, toIso }` bounds callStart so the UI can chunk by month and dodge Twenty\'s deep-pagination cap on workspaces with thousands of legacy rows. Set `onlyMissing: false` to refresh every outbound row (e.g. after a rate change). Calls shorter than MIN_CHARGEABLE_DURATION_SECONDS (default 15) get cost=null. Inbound rows are always null.',
+    'Recomputes callLog.cost using ZADARMA_RATE_PER_MINUTE / AI_RATE_PER_MINUTE × duration. Chargeable rows = outbound + AI-handled inbound (Retell bills agent time regardless of direction). Non-AI inbound stays cost=null. Default body `{ onlyMissing: true }` pre-filters cost IS NULL. Optional `{ fromIso, toIso }` bounds callStart so the UI can chunk by month and dodge Twenty\'s deep-pagination cap on workspaces with thousands of legacy rows. Set `onlyMissing: false` to refresh every row (e.g. after a rate change). Calls shorter than MIN_CHARGEABLE_DURATION_SECONDS (default 15) get cost=null.',
   timeoutSeconds: 300,
   handler,
   httpRouteTriggerSettings: {

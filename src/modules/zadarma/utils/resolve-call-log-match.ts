@@ -5,7 +5,16 @@ import { CoreApiClient } from 'twenty-client-sdk/core';
 // 1. correlationId  → idempotent join (vendor-side call ID)
 // 2. start_ts       → fuzzy match by callStart ± window
 // 3. end_ts         → fuzzy match by call end (callStart + duration ± window)
-// 4. recent         → most recent unmatched OUT call to that toNumber within window from now
+// 4. recent         → most recent unmatched call where clientNumber matches
+//                     either party (toNumber or fromNumber) within window from now
+//
+// Direction-agnostic clientNumber lookup: the upstream adapter (e.g. Retell)
+// reports `to_number` and `from_number` from its own perspective. For our
+// outbound call the client is in `to_number`; for our inbound call the client
+// is in `from_number`. Zadarma's `callLog.clientNumber` always holds the
+// remote party's E.164 number. We OR-match against both Retell-side numbers
+// so a single payload shape works for both directions — the time-window
+// filter (applied in JS) keeps the match precise.
 //
 // All strategies optionally narrow by `requireExtensions` (filter to
 // internalExtension IN [aiExtensions]) and `correlationId IS NULL` (so
@@ -61,28 +70,28 @@ const fetchByCorrelationId = async (
   return res.callLogs?.edges?.[0]?.node ?? null;
 };
 
-// Fetch fuzzy candidates: same `clientNumber` (toNumber), callType=OUT,
-// correlationId IS NULL, optional internalExtension filter via `in`. We
-// over-fetch (PAGE_SIZE) and pick the closest by time delta in JS — Twenty's
-// filter syntax doesn't support range queries (one-operator-per-field rule).
+// Fetch fuzzy candidates: callLog rows whose `clientNumber` matches either
+// the toNumber or the fromNumber (the remote party — see header comment for
+// why), `correlationId IS NULL`, plus optional internalExtension filter via
+// `in`. We over-fetch (PAGE_SIZE) and pick the closest by time delta in JS —
+// Twenty's filter syntax doesn't support range queries
+// (one-operator-per-field rule).
 const PAGE_SIZE = 100;
 
 const fetchFuzzyCandidates = async (
   client: CoreApiClient,
   toNumberE164: string,
-  fromNumberE164: string | undefined,
+  fromNumberE164: string,
   requireExtensions: boolean,
   aiExtensions: string[],
 ): Promise<CallLogCandidate[]> => {
+  const clientNumberCandidates = Array.from(
+    new Set([toNumberE164, fromNumberE164].filter((n) => n.length > 0)),
+  );
   const filter: Record<string, unknown> = {
-    clientNumber: { eq: toNumberE164 },
-    callType: { eq: 'OUT' },
+    clientNumber: { in: clientNumberCandidates },
     correlationId: { is: 'NULL' },
   };
-  // ourNumber filter is best-effort — different setups may report it
-  // inconsistently. Skip it to keep the candidate set robust; the time-window
-  // filter is precise enough.
-  void fromNumberE164;
   if (requireExtensions && aiExtensions.length > 0) {
     filter.internalExtension = { in: aiExtensions };
   }
@@ -147,11 +156,12 @@ export const resolveCallLogMatch = async (
   }
 
   const toNumberE164 = e164NoPlus(input.toNumber);
-  const fromNumberE164 = input.fromNumber ? e164NoPlus(input.fromNumber) : undefined;
-  if (!toNumberE164) {
+  const fromNumberE164 = e164NoPlus(input.fromNumber);
+  if (!toNumberE164 && !fromNumberE164) {
     return {
       matched: false,
-      reason: 'toNumber is required for fuzzy match (no correlationId hit)',
+      reason:
+        'toNumber or fromNumber is required for fuzzy match (no correlationId hit)',
     };
   }
 
