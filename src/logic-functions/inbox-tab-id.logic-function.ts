@@ -11,8 +11,16 @@ import { resolveZadarmaTabId } from 'src/modules/zadarma/utils/resolve-zadarma-t
 // for why this can't be a hardcoded constant.
 
 const handler = async (_event: RoutePayload<unknown>) => {
-  const tabId = await resolveZadarmaTabId(new MetadataApiClient());
-  return { ok: true, tabId };
+  // Never 500 over a metadata hiccup: the frontComponent treats a null tabId as
+  // "open the default tab", so a failure degrades gracefully instead of
+  // breaking the inbox.
+  try {
+    const tabId = await resolveZadarmaTabId(new MetadataApiClient());
+    return { ok: true, tabId };
+  } catch (err) {
+    console.error('[inbox-tab-id] resolve failed:', err);
+    return { ok: true, tabId: null };
+  }
 };
 
 export default defineLogicFunction({
