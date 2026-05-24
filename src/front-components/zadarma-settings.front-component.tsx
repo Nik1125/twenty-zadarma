@@ -81,6 +81,7 @@ const ZadarmaSettings = () => {
   // the free-text fallback shows up only when info.numbers is empty.
   const [zadarmaDids, setZadarmaDids] = useState<string>('');
   const [transcriptEnabled, setTranscriptEnabled] = useState<boolean>(true);
+  const [inboxSound, setInboxSound] = useState<boolean>(true);
   const [cabinetTimezone, setCabinetTimezone] = useState<string>('');
   const [tzCustomMode, setTzCustomMode] = useState<boolean>(false);
   const [savingVar, setSavingVar] = useState<string | null>(null);
@@ -212,6 +213,7 @@ const ZadarmaSettings = () => {
       const vars = app?.applicationVariables ?? [];
       const dids = vars.find((v) => v.key === 'ZADARMA_DIDS')?.value ?? '';
       const tr = (vars.find((v) => v.key === 'ZADARMA_TRANSCRIPT_ENABLED')?.value ?? 'true').toLowerCase();
+      const snd = (vars.find((v) => v.key === 'ZADARMA_INBOX_SOUND')?.value ?? 'true').toLowerCase();
       const tz = vars.find((v) => v.key === 'ZADARMA_CABINET_TIMEZONE')?.value ?? '';
       const zRate = vars.find((v) => v.key === 'ZADARMA_RATE_PER_MINUTE')?.value ?? '';
       const zCur = vars.find((v) => v.key === 'ZADARMA_RATE_CURRENCY')?.value ?? '';
@@ -221,6 +223,7 @@ const ZadarmaSettings = () => {
       const acpRaw = (vars.find((v) => v.key === 'ZADARMA_AUTO_CREATE_PERSON')?.value ?? 'false').toLowerCase();
       setZadarmaDids(dids);
       setTranscriptEnabled(tr !== 'false' && tr !== '0');
+      setInboxSound(snd !== 'false' && snd !== '0');
       setCabinetTimezone(tz);
       setZadarmaRatePerMinute(zRate);
       setZadarmaRateCurrency(zCur);
@@ -974,6 +977,26 @@ const ZadarmaSettings = () => {
             </span>
           </label>
           {savingVar === 'ZADARMA_TRANSCRIPT_ENABLED' && <span style={{ fontSize: 11, color: 'var(--t-font-color-secondary)' }}>saving…</span>}
+        </div>
+
+        <div style={row}>
+          <span style={labelCol}>Inbox sound</span>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 6, cursor: 'pointer' }}>
+            <input
+              type="checkbox"
+              checked={inboxSound}
+              onChange={(e: { detail?: { checked?: boolean } }) => {
+                const next = e.detail?.checked ?? !inboxSound;
+                setInboxSound(next);
+                updateAppVar('ZADARMA_INBOX_SOUND', next ? 'true' : 'false');
+              }}
+              disabled={!appId || savingVar === 'ZADARMA_INBOX_SOUND'}
+            />
+            <span style={{ fontSize: 12 }}>
+              {inboxSound ? 'Beep on new inbound SMS while the Zadarma Inbox is open' : 'Disabled — no sound'}
+            </span>
+          </label>
+          {savingVar === 'ZADARMA_INBOX_SOUND' && <span style={{ fontSize: 11, color: 'var(--t-font-color-secondary)' }}>saving…</span>}
         </div>
 
         <div style={row}>

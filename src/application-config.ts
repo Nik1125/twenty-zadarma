@@ -21,6 +21,7 @@ import {
   ZADARMA_RATE_PER_MINUTE_VARIABLE_UNIVERSAL_IDENTIFIER,
   ZADARMA_SECRET_VARIABLE_UNIVERSAL_IDENTIFIER,
   ZADARMA_TRANSCRIPT_ENABLED_VARIABLE_UNIVERSAL_IDENTIFIER,
+  ZADARMA_INBOX_SOUND_VARIABLE_UNIVERSAL_IDENTIFIER,
   ZADARMA_USER_KEY_VARIABLE_UNIVERSAL_IDENTIFIER,
 } from 'src/constants/universal-identifiers';
 
@@ -62,6 +63,17 @@ export default defineApplication({
       universalIdentifier: ZADARMA_TRANSCRIPT_ENABLED_VARIABLE_UNIVERSAL_IDENTIFIER,
       description:
         '[Manage in Custom tab] Save SPEECH_RECOGNITION transcripts into callLog.transcript. Accepts "true" or "false".',
+      value: 'true',
+    },
+    // Sound cue in the Zadarma Inbox: play a short beep when a new inbound SMS
+    // arrives while the inbox (page or side panel) is open. Operators toggle
+    // this from Settings → Zadarma. "true"/"false". Workspace-level (applies to
+    // everyone). Sound only plays while the inbox is open — there is no
+    // background notification (see [[project-sms-inbox-standalone-page]]).
+    ZADARMA_INBOX_SOUND: {
+      universalIdentifier: ZADARMA_INBOX_SOUND_VARIABLE_UNIVERSAL_IDENTIFIER,
+      description:
+        '[Manage in Custom tab] Play a beep in the Zadarma Inbox when a new inbound SMS arrives (only while the inbox is open). Accepts "true" or "false".',
       value: 'true',
     },
     // IANA timezone of your Zadarma cabinet (e.g. Europe/Warsaw, Europe/Berlin,
