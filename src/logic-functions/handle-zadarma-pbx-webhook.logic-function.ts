@@ -20,6 +20,7 @@ import { localToUtcIso } from 'src/modules/zadarma/utils/local-to-utc-iso';
 import { normalizePhone } from 'src/modules/zadarma/utils/normalize-phone';
 import { parseAiExtensions } from 'src/modules/zadarma/utils/parse-ai-extensions';
 import { resolveEnrichmentWindowSeconds } from 'src/modules/zadarma/utils/parse-enrichment-window';
+import { syncRecordingAudioBlock } from 'src/modules/zadarma/utils/attach-recording-audio';
 
 // Zadarma's webhook payload uses the cabinet's display timezone for
 // `call_start` (a wall-clock string with no offset). The applicationVariable
@@ -157,6 +158,22 @@ const writePersonCooldown = async (
       id: true,
     },
   });
+};
+
+// Best-effort: embed the recording player into the transcript (GDPR: link
+// only, no copy — see attach-recording-audio). Never fails the webhook.
+const embedRecordingAudio = async (
+  client: CoreApiClient,
+  callLogId: string,
+): Promise<void> => {
+  try {
+    await syncRecordingAudioBlock(client, callLogId);
+  } catch (err) {
+    console.warn(
+      `[zadarma-pbx-webhook] recording audio embed failed for ${callLogId}:`,
+      err,
+    );
+  }
 };
 
 const findCallLogIdByPbxCallId = async (
@@ -516,6 +533,7 @@ const handleNotifyRecord = async (body: ZadarmaPbxEvent & Record<string, unknown
     console.log(
       `[zadarma-pbx-webhook] NOTIFY_RECORD attached direct link to callLog=${existingId} callId=${callIdWithRec ?? '-'}`,
     );
+    await embedRecordingAudio(client, existingId);
     return { ok: true, action: 'record-attached-direct', callLogId: existingId };
   }
 
@@ -586,6 +604,7 @@ const handleNotifyRecord = async (body: ZadarmaPbxEvent & Record<string, unknown
   console.log(
     `[zadarma-pbx-webhook] NOTIFY_RECORD attached link to callLog=${existingId} callId=${callIdWithRec}`,
   );
+  await embedRecordingAudio(client, existingId);
   return { ok: true, action: 'record-attached', callLogId: existingId };
 };
 

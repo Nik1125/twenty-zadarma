@@ -17,6 +17,7 @@ import {
 import { parseAiExtensions } from 'src/modules/zadarma/utils/parse-ai-extensions';
 import { resolveEnrichmentWindowSeconds } from 'src/modules/zadarma/utils/parse-enrichment-window';
 import { resolveCallLogMatch } from 'src/modules/zadarma/utils/resolve-call-log-match';
+import { syncRecordingAudioBlock } from 'src/modules/zadarma/utils/attach-recording-audio';
 
 // POST /zadarma/call-enrichment (Bearer)
 //
@@ -311,6 +312,18 @@ const handler = async (
   if (matchResult.collapseIds.length > 0) {
     console.log(
       `[call-enrichment] collapsed phantom legs=[${matchResult.collapseIds.join(',')}] into canonical=${matchResult.callLogId}`,
+    );
+  }
+
+  // Embed the recording player at the top of the transcript (GDPR: link only,
+  // no copy — see attach-recording-audio). Best-effort; never fail the
+  // enrichment write that already succeeded.
+  try {
+    await syncRecordingAudioBlock(client, matchResult.callLogId);
+  } catch (err) {
+    console.warn(
+      `[call-enrichment] recording audio embed failed for ${matchResult.callLogId}:`,
+      err,
     );
   }
 

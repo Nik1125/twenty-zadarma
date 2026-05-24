@@ -2,6 +2,7 @@ import { defineLogicFunction } from 'twenty-sdk/define';
 import { type RoutePayload } from 'twenty-sdk/logic-function';
 import { CoreApiClient } from 'twenty-client-sdk/core';
 
+import { syncRecordingAudioBlock } from 'src/modules/zadarma/utils/attach-recording-audio';
 import { findLatestOpportunityIdForPerson } from 'src/modules/zadarma/utils/find-latest-opportunity-id';
 import { findPersonIdByClientNumber } from 'src/modules/zadarma/utils/find-person-by-phone';
 import { formatTranscript } from 'src/modules/zadarma/utils/format-transcript-blocknote';
@@ -147,6 +148,16 @@ const handleSpeechRecognition = async (body: ZadarmaEventPayload & Record<string
   console.log(
     `[zadarma-event-webhook] SPEECH_RECOGNITION attached transcript (${markdown.length} chars, ${turns.length} turns) to callLog=${callLog.id}`,
   );
+  // Embed the recording player at the top of the transcript (GDPR: link only,
+  // no copy). Best-effort — never fail the transcript write.
+  try {
+    await syncRecordingAudioBlock(client, callLog.id);
+  } catch (err) {
+    console.warn(
+      `[zadarma-event-webhook] recording audio embed failed for ${callLog.id}:`,
+      err,
+    );
+  }
   return {
     ok: true,
     action: 'transcript-attached',
