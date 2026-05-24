@@ -14,6 +14,11 @@ import { ZADARMA_INBOX_FRONT_COMPONENT_UNIVERSAL_IDENTIFIER } from 'src/front-co
 export default defineCommandMenuItem({
   universalIdentifier: 'e9268af2-8f0f-4eb8-bd36-cc8f5c9f5c92',
   label: 'Zadarma Inbox',
+  // shortLabel is REQUIRED for the pinned top-bar button to render its text
+  // and for the "Hide label" toggle to be enabled — with shortLabel null the
+  // button is icon-only and the toggle is locked (verified by diffing against
+  // the working "Show Notification" app command, which sets shortLabel).
+  shortLabel: 'Zadarma Inbox',
   icon: 'IconInbox',
   isPinned: true,
   availabilityType: 'GLOBAL',
