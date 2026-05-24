@@ -43,6 +43,10 @@ const ZadarmaInbox = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [clearing, setClearing] = useState<string | null>(null);
+  // Installed id of the Person page's "Zadarma" tab, resolved once on mount so
+  // a row click deep-links straight to the chat tab instead of Timeline. The
+  // id is per-install (not portable), hence the server lookup.
+  const [tabId, setTabId] = useState<string | null>(null);
 
   const fetchInbox = useCallback(async () => {
     const base = apiBase();
@@ -81,6 +85,25 @@ const ZadarmaInbox = () => {
     const interval = setInterval(fetchInbox, POLL_MS);
     return () => clearInterval(interval);
   }, [fetchInbox]);
+
+  // Resolve the Zadarma tab id once on mount (stable until the next install).
+  useEffect(() => {
+    const base = apiBase();
+    const token = process.env.TWENTY_APP_ACCESS_TOKEN;
+    if (!base || !token) return;
+    (async () => {
+      try {
+        const r = await fetch(`${base}/s/zadarma/inbox/tab-id`, {
+          method: 'GET',
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        const json = (await r.json()) as { tabId?: string | null };
+        if (json.tabId) setTabId(json.tabId);
+      } catch {
+        // Non-fatal: without a tabId the click just opens the default tab.
+      }
+    })();
+  }, []);
 
   const markRead = useCallback(
     async (personId: string) => {
@@ -227,7 +250,11 @@ const ZadarmaInbox = () => {
               <button
                 type="button"
                 style={rowMain}
-                onClick={() => navigate(`/object/person/${t.personId}`)}
+                onClick={() =>
+                  navigate(
+                    `/object/person/${t.personId}${tabId ? `#${tabId}` : ''}`,
+                  )
+                }
               >
                 <div style={nameLine}>
                   <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
