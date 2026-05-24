@@ -261,4 +261,12 @@ export default defineFrontComponent({
   description:
     'Messenger-style feed of Persons with unanswered inbound SMS. Click to open the Person; ✓ marks read without replying.',
   component: ZadarmaInbox,
+  // Second entry point (besides the standalone-page nav item) is a GLOBAL
+  // pinned command that opens this feed in the right SIDE PANEL. It is NOT
+  // declared here as a nested `command` — the SDK build leaves the top-level
+  // manifest `commandMenuItems` array empty when the command is nested under a
+  // frontComponent, so the server installs zero command items (verified: our
+  // person-panel nested command is missing on local + Coolify for exactly this
+  // reason). The command lives in its own defineCommandMenuItem manifest entry:
+  // src/command-menu-items/zadarma-inbox.command-menu-item.ts.
 });
