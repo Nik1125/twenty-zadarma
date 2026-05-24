@@ -1,8 +1,10 @@
 import { defineLogicFunction } from 'twenty-sdk/define';
 import { type RoutePayload } from 'twenty-sdk/logic-function';
 import { CoreApiClient } from 'twenty-client-sdk/core';
+import { MetadataApiClient } from 'twenty-client-sdk/metadata';
 
 import { syncRecordingAudioBlock } from 'src/modules/zadarma/utils/attach-recording-audio';
+import { INBOX_ICON_HAS, setInboxIcon } from 'src/modules/zadarma/utils/inbox-icon';
 import { findLatestOpportunityIdForPerson } from 'src/modules/zadarma/utils/find-latest-opportunity-id';
 import { findPersonIdByClientNumber } from 'src/modules/zadarma/utils/find-person-by-phone';
 import { formatTranscript } from 'src/modules/zadarma/utils/format-transcript-blocknote';
@@ -249,6 +251,17 @@ const handleInboundSms = async (
   })) as { createSmsLog?: { id: string } };
 
   const smsLogId = created.createSmsLog?.id;
+
+  // A fresh inbound SMS is by definition unanswered, so flip the Zadarma Inbox
+  // command icon to its "has unanswered" state. No scan needed (we know the
+  // count is ≥1); setInboxIcon is a no-op if already in that state. Best
+  // effort — a metadata hiccup must never fail webhook ingestion.
+  try {
+    await setInboxIcon(new MetadataApiClient(), INBOX_ICON_HAS);
+  } catch (err) {
+    console.error('[zadarma-event-webhook] inbox icon set failed:', err);
+  }
+
   console.log(
     `[zadarma-event-webhook] SMS inbound messageId=${messageId} client=${clientNumber} created=${smsLogId} personId=${personId} opportunityId=${opportunityId ?? '-'}`,
   );
