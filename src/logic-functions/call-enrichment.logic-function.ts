@@ -182,7 +182,15 @@ const handler = async (
   if (typeof summaryRaw === 'string') {
     updateData.summary = formatMarkdownToBlocknote(summaryRaw);
   }
-  if (typeof data.recordingUrl === 'string' && data.recordingUrl.length > 0) {
+  // Keep an existing Zadarma recording rather than overwriting it with the
+  // vendor URL — vendor links (e.g. Retell cloudfront) are time-signed and
+  // expire, the Zadarma recording is permanent. Only set when the canonical
+  // row has no recording yet.
+  if (
+    typeof data.recordingUrl === 'string' &&
+    data.recordingUrl.length > 0 &&
+    !matchResult.hasRecording
+  ) {
     updateData.recording = {
       primaryLinkLabel: 'Recording',
       primaryLinkUrl: data.recordingUrl,
@@ -281,6 +289,30 @@ const handler = async (
       id: true,
     },
   });
+
+  // Collapse Retell two-leg duplicates. One physical outbound call originated
+  // via Retell produces two Zadarma PBX legs with distinct pbx_call_id; the
+  // resolver picked the canonical "real" leg (the one with an Asterisk callId)
+  // above. Soft-delete the phantom SIP-origination leg(s) so a single call
+  // maps to a single callLog. Best-effort — a failed delete never fails the
+  // enrichment write that already succeeded.
+  for (const phantomId of matchResult.collapseIds) {
+    try {
+      await client.mutation({
+        deleteCallLog: { __args: { id: phantomId }, id: true },
+      });
+    } catch (err) {
+      console.warn(
+        `[call-enrichment] failed to collapse phantom leg ${phantomId}:`,
+        err,
+      );
+    }
+  }
+  if (matchResult.collapseIds.length > 0) {
+    console.log(
+      `[call-enrichment] collapsed phantom legs=[${matchResult.collapseIds.join(',')}] into canonical=${matchResult.callLogId}`,
+    );
+  }
 
   const elapsedMs = Date.now() - startedAt;
   console.log(

@@ -19,6 +19,7 @@ import { findPersonIdByClientNumber } from 'src/modules/zadarma/utils/find-perso
 import { localToUtcIso } from 'src/modules/zadarma/utils/local-to-utc-iso';
 import { normalizePhone } from 'src/modules/zadarma/utils/normalize-phone';
 import { parseAiExtensions } from 'src/modules/zadarma/utils/parse-ai-extensions';
+import { resolveEnrichmentWindowSeconds } from 'src/modules/zadarma/utils/parse-enrichment-window';
 
 // Zadarma's webhook payload uses the cabinet's display timezone for
 // `call_start` (a wall-clock string with no offset). The applicationVariable
@@ -171,6 +172,62 @@ const findCallLogIdByPbxCallId = async (
   return res.callLogs?.edges?.[0]?.node.id ?? null;
 };
 
+// Retell two-leg guard support. A Retell-originated outbound call shows up as
+// TWO Zadarma PBX legs with distinct pbx_call_id: the real PSTN leg (carries an
+// Asterisk callId) and a "phantom" SIP-origination leg (empty callId). When
+// post-call enrichment lands on the phantom BEFORE the real leg's
+// NOTIFY_OUT_END arrives, we upgrade that phantom in place rather than insert a
+// duplicate. A phantom is an OUT row with a vendor correlationId set but no
+// Asterisk callId. Returns the closest such row within `windowSeconds`, or null
+// (the normal ordering is handled on the enrichment side, which collapses the
+// phantom into the real leg).
+const findEnrichedPhantomOutTwinId = async (
+  client: CoreApiClient,
+  clientNumber: string,
+  callStartIso: string,
+  windowSeconds: number,
+): Promise<string | null> => {
+  const res = (await client.query({
+    callLogs: {
+      __args: {
+        filter: {
+          callType: { eq: 'OUT' },
+          clientNumber: { eq: clientNumber },
+          correlationId: { is: 'NOT_NULL' },
+        },
+        first: 20,
+      },
+      edges: {
+        node: { id: true, callStart: true, callId: true },
+      },
+    },
+  })) as {
+    callLogs?: {
+      edges?: Array<{
+        node: { id: string; callStart?: string | null; callId?: string | null };
+      }>;
+    };
+  };
+  const targetMs = Date.parse(callStartIso);
+  if (!Number.isFinite(targetMs)) return null;
+  const windowMs = windowSeconds * 1000;
+  let best: { id: string; delta: number } | null = null;
+  for (const edge of res.callLogs?.edges ?? []) {
+    const node = edge.node;
+    // Skip real legs — they carry an Asterisk callId and must not be retargeted.
+    if (typeof node.callId === 'string' && node.callId.trim().length > 0) {
+      continue;
+    }
+    if (!node.callStart) continue;
+    const ms = Date.parse(node.callStart);
+    if (!Number.isFinite(ms)) continue;
+    const delta = Math.abs(ms - targetMs);
+    if (delta > windowMs) continue;
+    if (!best || delta < best.delta) best = { id: node.id, delta };
+  }
+  return best?.id ?? null;
+};
+
 const handleNotifyEnd = async (body: ZadarmaPbxEvent & Record<string, unknown>) => {
   const pbxCallId = body.pbx_call_id;
   if (!pbxCallId) return { error: 'pbx_call_id missing in NOTIFY_END payload' };
@@ -279,6 +336,53 @@ const handleNotifyEnd = async (body: ZadarmaPbxEvent & Record<string, unknown>) 
     return { ok: true, action: 'updated', callLogId: existingId, personId };
   }
 
+  const callStartIso = resolveCallStartIso(body.call_start);
+
+  // Retell two-leg guard. If enrichment already landed on a phantom leg for
+  // this client (correlationId set, no Asterisk callId) within window, upgrade
+  // that row to this real leg's identity instead of creating a duplicate —
+  // covers the rare ordering where enrichment arrives before this
+  // NOTIFY_OUT_END. The normal ordering is handled on the enrichment side,
+  // where the resolver collapses the phantom into this real leg.
+  if (callType === 'OUT' && clientNumber && callStartIso) {
+    const phantomId = await findEnrichedPhantomOutTwinId(
+      client,
+      clientNumber,
+      callStartIso,
+      resolveEnrichmentWindowSeconds(undefined),
+    );
+    if (phantomId) {
+      await client.mutation({
+        updateCallLog: {
+          __args: {
+            id: phantomId,
+            data: {
+              pbxCallId,
+              callStart: callStartIso,
+              duration,
+              disposition,
+              internalExtension: body.internal || null,
+              callerType,
+              ...(personId ? { personId } : {}),
+              ...(cost ? { cost } : {}),
+            },
+          },
+          id: true,
+        },
+      });
+      await writePersonCooldown(client, personId);
+      console.log(
+        `[zadarma-pbx-webhook] NOTIFY_END pbx=${pbxCallId} type=${callType} client=${clientNumber} dur=${duration} merged real leg into enriched phantom=${phantomId} personId=${personId}`,
+      );
+      return {
+        ok: true,
+        action: 'merged-into-twin',
+        callLogId: phantomId,
+        personId,
+      };
+    }
+  }
+
   // Auto-attach to the Person's most-recently-created opportunity (if any)
   // so fresh calls land on the deal the operator is currently working.
   // Null when the Person has no opportunities — the field stays empty.
@@ -291,7 +395,7 @@ const handleNotifyEnd = async (body: ZadarmaPbxEvent & Record<string, unknown>) 
           name: `${callType} ${clientNumber ?? '?'}${body.call_start ? ' — ' + body.call_start : ''}`,
           pbxCallId,
           callType,
-          callStart: resolveCallStartIso(body.call_start),
+          callStart: callStartIso,
           duration,
           disposition,
           clientNumber: clientNumber ?? '',

@@ -33,7 +33,18 @@ export type MatchInput = {
 };
 
 export type MatchOutput =
-  | { matched: true; callLogId: string; matchedBy: MatchedBy; offsetMs: number }
+  | {
+      matched: true;
+      callLogId: string;
+      matchedBy: MatchedBy;
+      offsetMs: number;
+      // Sibling "phantom" legs of the same physical call that should be
+      // soft-deleted by the caller (empty when there is no duplicate).
+      collapseIds: string[];
+      // Whether the canonical row already holds a recording — lets the caller
+      // avoid overwriting a permanent Zadarma recording with a vendor URL.
+      hasRecording: boolean;
+    }
   | { matched: false; reason: string };
 
 export type MatchedBy =
@@ -53,6 +64,10 @@ type CallLogCandidate = {
   duration?: number | null;
   correlationId?: string | null;
   internalExtension?: string | null;
+  clientNumber?: string | null;
+  callId?: string | null;
+  disposition?: string | null;
+  recording?: { primaryLinkUrl?: string | null } | null;
 };
 
 const fetchByCorrelationId = async (
@@ -62,7 +77,14 @@ const fetchByCorrelationId = async (
   const res = (await client.query({
     callLogs: {
       __args: { filter: { correlationId: { eq: correlationId } }, first: 1 },
-      edges: { node: { id: true, callStart: true, correlationId: true } },
+      edges: {
+        node: {
+          id: true,
+          callStart: true,
+          correlationId: true,
+          recording: { primaryLinkUrl: true },
+        },
+      },
     },
   })) as {
     callLogs?: { edges?: Array<{ node: CallLogCandidate }> };
@@ -105,6 +127,10 @@ const fetchFuzzyCandidates = async (
           duration: true,
           correlationId: true,
           internalExtension: true,
+          clientNumber: true,
+          callId: true,
+          disposition: true,
+          recording: { primaryLinkUrl: true },
         },
       },
     },
@@ -136,11 +162,43 @@ const pickClosest = (
   return best;
 };
 
+// Two legs of one physical call start within a couple seconds of each other.
+// A genuine redial to the same number is normally further apart, so a tight
+// window keeps us from collapsing distinct calls.
+const SIBLING_LEG_WINDOW_MS = 15_000;
+
+const hasCallId = (c: CallLogCandidate): boolean =>
+  typeof c.callId === 'string' && c.callId.trim().length > 0;
+const isAnswered = (c: CallLogCandidate): boolean =>
+  (c.disposition ?? '').toUpperCase() === 'ANSWERED';
+const durationOf = (c: CallLogCandidate): number =>
+  typeof c.duration === 'number' ? c.duration : 0;
+const hasRecordingUrl = (c: CallLogCandidate): boolean =>
+  typeof c.recording?.primaryLinkUrl === 'string' &&
+  c.recording.primaryLinkUrl.length > 0;
+
+// Among the time-cluster of legs for one physical call, the canonical "real"
+// PSTN leg is the one Zadarma actually connected: it carries an Asterisk
+// callId, is usually ANSWERED, and has the longest duration. Retell-originated
+// outbound adds a "phantom" SIP-origination leg (empty callId, often
+// CALL_FAILED / duration 0). Preference: callId > ANSWERED > longer duration >
+// earliest start.
+const pickCanonical = (cluster: CallLogCandidate[]): CallLogCandidate =>
+  [...cluster].sort((a, b) => {
+    if (hasCallId(a) !== hasCallId(b)) return hasCallId(a) ? -1 : 1;
+    if (isAnswered(a) !== isAnswered(b)) return isAnswered(a) ? -1 : 1;
+    if (durationOf(a) !== durationOf(b)) return durationOf(b) - durationOf(a);
+    const as = a.callStart ? Date.parse(a.callStart) : Number.POSITIVE_INFINITY;
+    const bs = b.callStart ? Date.parse(b.callStart) : Number.POSITIVE_INFINITY;
+    return as - bs;
+  })[0];
+
 export const resolveCallLogMatch = async (
   client: CoreApiClient,
   input: MatchInput,
 ): Promise<MatchOutput> => {
-  // Strategy 1: explicit correlationId (idempotent re-runs)
+  // Strategy 1: explicit correlationId (idempotent re-runs). The phantom leg
+  // was already collapsed on the first enrichment, so no cluster check here.
   if (input.correlationId) {
     const hit = await fetchByCorrelationId(client, input.correlationId);
     if (hit) {
@@ -149,6 +207,8 @@ export const resolveCallLogMatch = async (
         callLogId: hit.id,
         matchedBy: 'correlationId',
         offsetMs: 0,
+        collapseIds: [],
+        hasRecording: hasRecordingUrl(hit),
       };
     }
     // No record carries this correlationId yet — fall through to fuzzy so
@@ -174,46 +234,77 @@ export const resolveCallLogMatch = async (
     input.aiExtensions,
   );
 
+  let hit:
+    | { candidate: CallLogCandidate; offsetMs: number; matchedBy: MatchedBy }
+    | null = null;
+
   // Strategy 2: by start_timestamp
   if (input.startTimestamp !== undefined) {
-    const hit = pickClosest(candidates, input.startTimestamp, windowMs, 'start');
-    if (hit) {
-      return {
-        matched: true,
-        callLogId: hit.candidate.id,
-        matchedBy: 'time-window-start',
-        offsetMs: hit.offsetMs,
-      };
-    }
+    const r = pickClosest(candidates, input.startTimestamp, windowMs, 'start');
+    if (r) hit = { ...r, matchedBy: 'time-window-start' };
   }
 
   // Strategy 3: by end_timestamp
-  if (input.endTimestamp !== undefined) {
-    const hit = pickClosest(candidates, input.endTimestamp, windowMs, 'end');
-    if (hit) {
-      return {
-        matched: true,
-        callLogId: hit.candidate.id,
-        matchedBy: 'time-window-end',
-        offsetMs: hit.offsetMs,
-      };
-    }
+  if (!hit && input.endTimestamp !== undefined) {
+    const r = pickClosest(candidates, input.endTimestamp, windowMs, 'end');
+    if (r) hit = { ...r, matchedBy: 'time-window-end' };
   }
 
   // Strategy 4: recent fallback — pick most recent OUT to this number within
   // window from now. Only triggers when no timestamps provided at all.
-  if (input.startTimestamp === undefined && input.endTimestamp === undefined) {
-    const nowMs = Date.now();
-    const hit = pickClosest(candidates, nowMs, windowMs, 'start');
-    if (hit) {
-      return {
-        matched: true,
-        callLogId: hit.candidate.id,
-        matchedBy: 'recent-fallback',
-        offsetMs: hit.offsetMs,
-      };
-    }
+  if (
+    !hit &&
+    input.startTimestamp === undefined &&
+    input.endTimestamp === undefined
+  ) {
+    const r = pickClosest(candidates, Date.now(), windowMs, 'start');
+    if (r) hit = { ...r, matchedBy: 'recent-fallback' };
   }
 
-  return { matched: false, reason: 'no callLog matched within window' };
+  if (!hit) {
+    return { matched: false, reason: 'no callLog matched within window' };
+  }
+
+  // Collapse Retell two-leg duplicates: gather the legs of the same physical
+  // call (same clientNumber, callStart within SIBLING_LEG_WINDOW), pick the
+  // canonical real leg, and return the phantom legs for the caller to delete.
+  // We only ever flag a phantom (empty callId) for deletion, and only when a
+  // confirmed real leg (with callId) anchors the cluster — so two genuine
+  // back-to-back calls are never merged.
+  const anchorMs = hit.candidate.callStart
+    ? Date.parse(hit.candidate.callStart)
+    : NaN;
+  const cluster = Number.isFinite(anchorMs)
+    ? candidates.filter((c) => {
+        if (
+          c.clientNumber != null &&
+          hit!.candidate.clientNumber != null &&
+          c.clientNumber !== hit!.candidate.clientNumber
+        ) {
+          return false;
+        }
+        if (!c.callStart) return false;
+        const ms = Date.parse(c.callStart);
+        return (
+          Number.isFinite(ms) &&
+          Math.abs(ms - anchorMs) <= SIBLING_LEG_WINDOW_MS
+        );
+      })
+    : [hit.candidate];
+
+  const canonical = cluster.length > 1 ? pickCanonical(cluster) : hit.candidate;
+  const collapseIds = hasCallId(canonical)
+    ? cluster
+        .filter((c) => c.id !== canonical.id && !hasCallId(c))
+        .map((c) => c.id)
+    : [];
+
+  return {
+    matched: true,
+    callLogId: canonical.id,
+    matchedBy: hit.matchedBy,
+    offsetMs: hit.offsetMs,
+    collapseIds,
+    hasRecording: hasRecordingUrl(canonical),
+  };
 };
