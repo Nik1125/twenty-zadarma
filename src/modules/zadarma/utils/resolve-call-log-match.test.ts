@@ -12,6 +12,9 @@ type CandidateRow = {
   duration?: number | null;
   correlationId?: string | null;
   internalExtension?: string | null;
+  callId?: string | null;
+  disposition?: string | null;
+  recording?: { primaryLinkUrl?: string | null } | null;
 };
 
 type FuzzyRow = CandidateRow & { clientNumber?: string };
@@ -274,6 +277,158 @@ describe('resolveCallLogMatch', () => {
     expect(out.matched).toBe(true);
     if (out.matched) {
       expect(out.callLogId).toBe('cl-real');
+    }
+  });
+
+  // --- Retell two-leg duplicate collapse ---------------------------------
+  // One physical outbound call originated via Retell shows up as TWO Zadarma
+  // PBX legs with distinct pbx_call_id. The "real" PSTN leg carries an
+  // Asterisk callId (+ ANSWERED + duration); the "phantom" SIP-origination
+  // leg has an empty callId (often CALL_FAILED / duration 0). Enrichment must
+  // converge on the real leg and return the phantom(s) in `collapseIds` so the
+  // caller can soft-delete them.
+  it('collapse: canonical = leg with callId, phantom returned in collapseIds', async () => {
+    const startMs = Date.UTC(2026, 4, 22, 16, 40, 7);
+    const client = buildClientStub(new Map(), [
+      {
+        id: 'phantom',
+        callStart: '2026-05-22T16:40:08.000Z',
+        correlationId: null,
+        clientNumber: '48530500511',
+        callId: '',
+        disposition: 'CALL_FAILED',
+        duration: 0,
+      },
+      {
+        id: 'real',
+        callStart: '2026-05-22T16:40:07.000Z',
+        correlationId: null,
+        clientNumber: '48530500511',
+        callId: '1779468006.16770855',
+        disposition: 'ANSWERED',
+        duration: 31,
+      },
+    ]);
+    const out = await resolveCallLogMatch(client as never, {
+      ...baseInput,
+      toNumber: '+48530500511',
+      correlationId: 'call_f88c',
+      startTimestamp: startMs,
+    });
+    expect(out.matched).toBe(true);
+    if (out.matched) {
+      expect(out.callLogId).toBe('real');
+      expect(out.collapseIds).toEqual(['phantom']);
+    }
+  });
+
+  it('collapse: single leg yields empty collapseIds (no duplicate)', async () => {
+    const startMs = Date.UTC(2026, 4, 4, 11, 11, 0);
+    const client = buildClientStub(new Map(), [
+      {
+        id: 'solo',
+        callStart: '2026-05-04T11:11:02.000Z',
+        correlationId: null,
+        clientNumber: '48539923725',
+        callId: 'x.1',
+        disposition: 'ANSWERED',
+        duration: 20,
+      },
+    ]);
+    const out = await resolveCallLogMatch(client as never, {
+      ...baseInput,
+      startTimestamp: startMs,
+    });
+    expect(out.matched).toBe(true);
+    if (out.matched) {
+      expect(out.callLogId).toBe('solo');
+      expect(out.collapseIds).toEqual([]);
+    }
+  });
+
+  it('collapse: two distinct real legs (both have callId) are NOT collapsed', async () => {
+    const startMs = Date.UTC(2026, 4, 4, 11, 11, 5);
+    const client = buildClientStub(new Map(), [
+      {
+        id: 'call-a',
+        callStart: '2026-05-04T11:11:04.000Z',
+        correlationId: null,
+        clientNumber: '48539923725',
+        callId: 'a.1',
+        disposition: 'ANSWERED',
+        duration: 10,
+      },
+      {
+        id: 'call-b',
+        callStart: '2026-05-04T11:11:06.000Z',
+        correlationId: null,
+        clientNumber: '48539923725',
+        callId: 'b.1',
+        disposition: 'ANSWERED',
+        duration: 12,
+      },
+    ]);
+    const out = await resolveCallLogMatch(client as never, {
+      ...baseInput,
+      startTimestamp: startMs,
+    });
+    expect(out.matched).toBe(true);
+    if (out.matched) {
+      // neither leg is a phantom (both carry callId) → keep both
+      expect(out.collapseIds).toEqual([]);
+    }
+  });
+
+  it('collapse: phantom-only cluster (no real leg yet) collapses nothing', async () => {
+    const startMs = Date.UTC(2026, 4, 4, 11, 11, 5);
+    const client = buildClientStub(new Map(), [
+      {
+        id: 'phantom-only',
+        callStart: '2026-05-04T11:11:05.000Z',
+        correlationId: null,
+        clientNumber: '48539923725',
+        callId: '',
+        disposition: 'CALL_FAILED',
+        duration: 0,
+      },
+    ]);
+    const out = await resolveCallLogMatch(client as never, {
+      ...baseInput,
+      startTimestamp: startMs,
+    });
+    expect(out.matched).toBe(true);
+    if (out.matched) {
+      expect(out.callLogId).toBe('phantom-only');
+      expect(out.collapseIds).toEqual([]);
+    }
+  });
+
+  it('collapse: correlationId hit returns empty collapseIds + hasRecording from row', async () => {
+    const client = buildClientStub(
+      new Map([
+        [
+          'call_x',
+          [
+            {
+              id: 'cl-1',
+              callStart: '2026-05-04T11:11:14.000Z',
+              correlationId: 'call_x',
+              recording: { primaryLinkUrl: 'https://rec.example/file.mp3' },
+            },
+          ],
+        ],
+      ]),
+      [],
+    );
+    const out = await resolveCallLogMatch(client as never, {
+      ...baseInput,
+      correlationId: 'call_x',
+      startTimestamp: 0,
+    });
+    expect(out.matched).toBe(true);
+    if (out.matched) {
+      expect(out.collapseIds).toEqual([]);
+      expect(out.hasRecording).toBe(true);
     }
   });
 
