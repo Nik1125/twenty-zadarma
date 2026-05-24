@@ -59,6 +59,13 @@ const ZadarmaInbox = () => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [clearing, setClearing] = useState<string | null>(null);
+  // Second channel: missed inbound calls. Independent feed + state; the bell
+  // icon and the sound chime stay SMS-only by design, so nothing here touches
+  // soundTick / prevMaxAtRef / the inbox-icon signal.
+  const [tab, setTab] = useState<'sms' | 'calls'>('sms');
+  const [callThreads, setCallThreads] = useState<Thread[]>([]);
+  const [callLoading, setCallLoading] = useState(true);
+  const [callError, setCallError] = useState<string | null>(null);
   // Installed id of the Person page's "Zadarma" tab, resolved once on mount so
   // a row click deep-links straight to the chat tab instead of Timeline. The
   // id is per-install (not portable), hence the server lookup.
@@ -119,12 +126,49 @@ const ZadarmaInbox = () => {
     }
   }, []);
 
+  // Missed-calls feed. No sound logic — the chime is SMS-only.
+  const fetchMissedCalls = useCallback(async () => {
+    const base = apiBase();
+    const token = process.env.TWENTY_APP_ACCESS_TOKEN;
+    if (!base || !token) {
+      setCallError('App is not configured (missing API URL / access token).');
+      setCallLoading(false);
+      return;
+    }
+    try {
+      const r = await fetch(`${base}/s/zadarma/inbox/missed-calls`, {
+        method: 'GET',
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const json = (await r.json()) as {
+        ok?: boolean;
+        threads?: Thread[];
+        error?: string;
+      };
+      if (!r.ok || json.ok === false) {
+        setCallError(json.error ?? `HTTP ${r.status}`);
+      } else {
+        setCallThreads(json.threads ?? []);
+        setCallError(null);
+      }
+    } catch (err) {
+      setCallError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setCallLoading(false);
+    }
+  }, []);
+
   useEffect(() => {
     setLoading(true);
+    setCallLoading(true);
     fetchInbox();
-    const interval = setInterval(fetchInbox, POLL_MS);
+    fetchMissedCalls();
+    const interval = setInterval(() => {
+      fetchInbox();
+      fetchMissedCalls();
+    }, POLL_MS);
     return () => clearInterval(interval);
-  }, [fetchInbox]);
+  }, [fetchInbox, fetchMissedCalls]);
 
   // Resolve the Zadarma tab id once on mount (stable until the next install).
   useEffect(() => {
@@ -182,15 +226,23 @@ const ZadarmaInbox = () => {
   }, []);
 
   const markRead = useCallback(
-    async (personId: string) => {
+    async (personId: string, channel: 'sms' | 'calls') => {
       const base = apiBase();
       const token = process.env.TWENTY_APP_ACCESS_TOKEN;
       if (!base || !token) return;
       setClearing(personId);
+      const path =
+        channel === 'calls'
+          ? '/s/zadarma/inbox/clear-calls'
+          : '/s/zadarma/inbox/clear';
       // Optimistic: drop the thread immediately so the UI feels instant.
-      setThreads((prev) => prev.filter((t) => t.personId !== personId));
+      if (channel === 'calls') {
+        setCallThreads((prev) => prev.filter((t) => t.personId !== personId));
+      } else {
+        setThreads((prev) => prev.filter((t) => t.personId !== personId));
+      }
       try {
-        await fetch(`${base}/s/zadarma/inbox/clear`, {
+        await fetch(`${base}${path}`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/x-www-form-urlencoded',
@@ -200,12 +252,13 @@ const ZadarmaInbox = () => {
         });
       } catch {
         // Re-sync on failure so a dropped thread reappears if the write failed.
-        fetchInbox();
+        if (channel === 'calls') fetchMissedCalls();
+        else fetchInbox();
       } finally {
         setClearing(null);
       }
     },
-    [fetchInbox],
+    [fetchInbox, fetchMissedCalls],
   );
 
   // ── styles
@@ -217,14 +270,42 @@ const ZadarmaInbox = () => {
     fontFamily: 'inherit',
     color: 'var(--t-font-color-primary)',
   };
-  const header: CSSProperties = {
+  const tabRow: CSSProperties = {
+    display: 'flex',
+    borderBottom: '1px solid var(--t-border-color-light)',
+  };
+  const tabBtn: CSSProperties = {
+    flex: 1,
     display: 'flex',
     alignItems: 'center',
-    justifyContent: 'space-between',
-    padding: '12px 16px',
-    borderBottom: '1px solid var(--t-border-color-light)',
-    fontSize: 14,
+    justifyContent: 'center',
+    gap: 6,
+    padding: '12px 8px',
+    border: 'none',
+    borderBottom: '2px solid transparent',
+    background: 'transparent',
+    color: 'var(--t-font-color-secondary)',
+    fontSize: 13,
     fontWeight: 600,
+    fontFamily: 'inherit',
+    cursor: 'pointer',
+  };
+  const tabBtnActive: CSSProperties = {
+    color: 'var(--t-font-color-primary)',
+    borderBottom: '2px solid var(--t-color-blue)',
+  };
+  const tabBadge: CSSProperties = {
+    minWidth: 18,
+    height: 18,
+    padding: '0 5px',
+    borderRadius: 9,
+    background: 'var(--t-color-blue)',
+    color: 'var(--t-font-color-inverted)',
+    fontSize: 10,
+    fontWeight: 600,
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: 'center',
   };
   const list: CSSProperties = {
     flex: 1,
@@ -304,59 +385,104 @@ const ZadarmaInbox = () => {
     textAlign: 'center',
   };
 
+  // One row renderer for both channels — they differ only in the snippet text,
+  // the clear path (via markRead's channel arg), and the empty-state copy.
+  const renderList = (
+    items: Thread[],
+    channel: 'sms' | 'calls',
+    isLoading: boolean,
+    err: string | null,
+  ) => {
+    if (isLoading) return <div style={empty}>Loading…</div>;
+    if (err)
+      return (
+        <div style={{ ...empty, color: 'var(--t-font-color-danger)' }}>
+          ⚠ {err}
+        </div>
+      );
+    if (items.length === 0)
+      return (
+        <div style={empty}>
+          {channel === 'calls'
+            ? 'No missed calls. 🎉'
+            : 'No unanswered messages. 🎉'}
+        </div>
+      );
+    return (
+      <div style={list}>
+        {items.map((t) => (
+          <div key={t.personId} style={row}>
+            <button
+              type="button"
+              style={rowMain}
+              onClick={() =>
+                navigate(
+                  `/object/person/${t.personId}${tabId ? `#${tabId}` : ''}`,
+                )
+              }
+            >
+              <div style={nameLine}>
+                <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {t.name}
+                </span>
+                <span style={time}>{formatDateTime(t.lastAt)}</span>
+              </div>
+              <div style={snippet}>
+                {channel === 'calls'
+                  ? `Missed call${t.unreadCount > 1 ? ` ×${t.unreadCount}` : ''}`
+                  : t.lastBody || '(empty message)'}
+              </div>
+            </button>
+            <span style={badge}>{t.unreadCount}</span>
+            <button
+              type="button"
+              style={readBtn}
+              disabled={clearing === t.personId}
+              onClick={() => markRead(t.personId, channel)}
+              title={
+                channel === 'calls'
+                  ? 'Mark handled — no callback needed'
+                  : 'Mark read — no reply needed'
+              }
+            >
+              {clearing === t.personId ? '…' : '✓'}
+            </button>
+          </div>
+        ))}
+      </div>
+    );
+  };
+
   return (
     <div style={container}>
-      <div style={header}>
-        <span>📨 Unanswered SMS</span>
-        <span style={{ fontSize: 12, color: 'var(--t-font-color-secondary)', fontWeight: 400 }}>
-          {threads.length || ''}
-        </span>
+      <div style={tabRow}>
+        <button
+          type="button"
+          style={tab === 'sms' ? { ...tabBtn, ...tabBtnActive } : tabBtn}
+          onClick={() => setTab('sms')}
+        >
+          📨 SMS
+          {threads.length ? <span style={tabBadge}>{threads.length}</span> : null}
+        </button>
+        <button
+          type="button"
+          style={tab === 'calls' ? { ...tabBtn, ...tabBtnActive } : tabBtn}
+          onClick={() => setTab('calls')}
+        >
+          📞 Calls
+          {callThreads.length ? (
+            <span style={tabBadge}>{callThreads.length}</span>
+          ) : null}
+        </button>
       </div>
-      {/* Plays once whenever a new inbound bumps soundTick (declarative — the
-          worker realm has no Audio constructor). Gated by ZADARMA_INBOX_SOUND. */}
+      {/* Plays once whenever a new inbound SMS bumps soundTick (declarative —
+          the worker realm has no Audio constructor). Gated by
+          ZADARMA_INBOX_SOUND. SMS-only by design — missed calls are silent. */}
       {soundTick > 0 ? <audio key={soundTick} src={BEEP} autoPlay /> : null}
 
-      {loading ? (
-        <div style={empty}>Loading…</div>
-      ) : error ? (
-        <div style={{ ...empty, color: 'var(--t-font-color-danger)' }}>⚠ {error}</div>
-      ) : threads.length === 0 ? (
-        <div style={empty}>No unanswered messages. 🎉</div>
-      ) : (
-        <div style={list}>
-          {threads.map((t) => (
-            <div key={t.personId} style={row}>
-              <button
-                type="button"
-                style={rowMain}
-                onClick={() =>
-                  navigate(
-                    `/object/person/${t.personId}${tabId ? `#${tabId}` : ''}`,
-                  )
-                }
-              >
-                <div style={nameLine}>
-                  <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                    {t.name}
-                  </span>
-                  <span style={time}>{formatDateTime(t.lastAt)}</span>
-                </div>
-                <div style={snippet}>{t.lastBody || '(empty message)'}</div>
-              </button>
-              <span style={badge}>{t.unreadCount}</span>
-              <button
-                type="button"
-                style={readBtn}
-                disabled={clearing === t.personId}
-                onClick={() => markRead(t.personId)}
-                title="Mark read — no reply needed"
-              >
-                {clearing === t.personId ? '…' : '✓'}
-              </button>
-            </div>
-          ))}
-        </div>
-      )}
+      {tab === 'sms'
+        ? renderList(threads, 'sms', loading, error)
+        : renderList(callThreads, 'calls', callLoading, callError)}
     </div>
   );
 };
