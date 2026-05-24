@@ -7,6 +7,7 @@ import {
   AI_EXTENSIONS_VARIABLE_UNIVERSAL_IDENTIFIER,
   AI_RATE_CURRENCY_VARIABLE_UNIVERSAL_IDENTIFIER,
   MIN_CHARGEABLE_DURATION_SECONDS_VARIABLE_UNIVERSAL_IDENTIFIER,
+  MISSED_CALL_MIN_DURATION_SECONDS_VARIABLE_UNIVERSAL_IDENTIFIER,
   AI_RATE_PER_MINUTE_VARIABLE_UNIVERSAL_IDENTIFIER,
   ZADARMA_AUTO_CREATE_PERSON_VARIABLE_UNIVERSAL_IDENTIFIER,
   TEAMSALE_BASE_URL_VARIABLE_UNIVERSAL_IDENTIFIER,
@@ -161,6 +162,19 @@ export default defineApplication({
       description:
         '[Manage in Custom tab] Minimum chargeable call duration (seconds). Calls shorter than this get cost=null. 0 disables the threshold. Default: 15.',
       value: '15',
+    },
+    // A call counts as "missed" (and shows in the Zadarma Inbox → Calls tab) if
+    // it is inbound and either NOT answered, or answered but shorter than this
+    // many seconds. The duration gate filters PBX "ghost" answers: ANSWERED
+    // calls of a few seconds with no recording/transcript where no real
+    // conversation happened. Distinct from MIN_CHARGEABLE_DURATION_SECONDS
+    // (billing) — this one is purely the inbox visibility threshold. Default 10.
+    MISSED_CALL_MIN_DURATION_SECONDS: {
+      universalIdentifier:
+        MISSED_CALL_MIN_DURATION_SECONDS_VARIABLE_UNIVERSAL_IDENTIFIER,
+      description:
+        '[Manage in Custom tab] A call is "missed" (shown in the Inbox Calls tab) if it is inbound and either not answered or shorter than this many seconds (filters PBX ghost answers). Separate from billing. Default: 10.',
+      value: '10',
     },
     // Toggle for the inbound webhook auto-create-Person branch. When true,
     // a NOTIFY_END / NOTIFY_OUT_END event from a number that does not
