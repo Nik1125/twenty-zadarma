@@ -1,7 +1,9 @@
 import { defineLogicFunction } from 'twenty-sdk/define';
 import { type RoutePayload } from 'twenty-sdk/logic-function';
 import { CoreApiClient } from 'twenty-client-sdk/core';
+import { MetadataApiClient } from 'twenty-client-sdk/metadata';
 
+import { refreshInboxIcon } from 'src/modules/zadarma/utils/inbox-icon';
 import { signZadarmaRequest } from 'src/modules/zadarma/connector/sign-request';
 import { findLatestOpportunityIdForPerson } from 'src/modules/zadarma/utils/find-latest-opportunity-id';
 import { findPersonIdByClientNumber } from 'src/modules/zadarma/utils/find-person-by-phone';
@@ -263,6 +265,15 @@ const innerHandler = async (
   // component / external API call going through this endpoint).
   if (personId) {
     await updateLastContactedIfNewer(client, personId, sentAt);
+  }
+
+  // An outbound reply may have answered the last unanswered thread (or not —
+  // others may remain), so recompute and update the Zadarma Inbox command
+  // icon. Best effort — never fail the send over a metadata hiccup.
+  try {
+    await refreshInboxIcon(client, new MetadataApiClient());
+  } catch (err) {
+    console.error('[send-zadarma-sms] inbox icon refresh failed:', err);
   }
 
   console.log(
