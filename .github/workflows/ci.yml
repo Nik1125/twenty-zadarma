@@ -10,7 +10,13 @@ permissions:
   contents: read
 
 env:
-  TWENTY_VERSION: latest
+  # Pinned, not "latest": twenty-sdk/twenty-client-sdk are pinned to 2.3.0
+  # (package.json), last verified back-compat against server v2.7.3. Upstream
+  # "latest" has since moved to 2.20+, whose reserved std fields
+  # (id/createdAt/searchVector/...) collide with this SDK's manifest and fail
+  # Dev sync with ~20 errors — see docs/upgrade/ and the chore/upgrade-twenty-2.20
+  # branch for the actual version-bump work. Bump this pin only alongside that.
+  TWENTY_VERSION: v2.7.3
 
 concurrency:
   group: ci-${{ github.ref }}
