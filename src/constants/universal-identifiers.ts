@@ -66,3 +66,9 @@ export const AI_BIOGRAPHY_FIELD_UNIVERSAL_IDENTIFIER =
 
 export const ZADARMA_INBOX_SOUND_VARIABLE_UNIVERSAL_IDENTIFIER =
   '66279e63-ddad-485d-9a69-547c99c0e543';
+
+// Optional pre-approved alphanumeric Sender ID (Zadarma cabinet → SMS →
+// Sender ID) used as the outbound SMS `caller_id` instead of the raw DID.
+// Empty = current numeric-caller_id behaviour (safe default / instant revert).
+export const ZADARMA_SMS_SENDER_ID_VARIABLE_UNIVERSAL_IDENTIFIER =
+  'a5b824f2-e4ba-40b1-8b47-09740d951851';

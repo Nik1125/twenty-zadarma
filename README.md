@@ -84,12 +84,14 @@ After install, open your Twenty workspace → **Settings → Applications → Za
 | `ZADARMA_TRANSCRIPT_ENABLED` | `true` / `false` — toggle `SPEECH_RECOGNITION` processing for call transcripts |
 | `ZADARMA_CABINET_TIMEZONE` | IANA timezone of your Zadarma cabinet (e.g. `Europe/Warsaw`, `Europe/Berlin`, `America/New_York`). Required for accurate `callLog.callStart` — set it in the **Cabinet timezone** field of the custom Zadarma Settings tab (autocomplete suggests common values). Without it live call records are saved without start time. |
 | `ACTIVE_CALL_COOLDOWN_MINUTES` | Active-call lock: minutes a Person stays in `COOLDOWN` after `NOTIFY_END`. Default `5`, max `1440`. Consumers (n8n / Retell / future click-to-call) read `Person.activeCallStatus` + `Person.activeCallCooldownUntil` to avoid back-to-back dials. App never enforces the lock — see [`docs/ACTIVE_CALL_LOCK.md`](docs/ACTIVE_CALL_LOCK.md) for the consumer contract. |
+| `ZADARMA_SMS_SENDER_ID` | Optional. Pre-approved alphanumeric Sender ID from your Zadarma cabinet (SMS → Sender ID — the same list as the "Od kogo" dropdown when sending manually), e.g. `Hyalual`. When set, outbound SMS show this name instead of the raw DID. Leave blank (default) to send from the phone number; clearing it is the instant rollback if a carrier rejects the Sender ID. |
 
 ### Custom Zadarma Settings tab
 
 Switch to the **Zadarma** tab inside Settings. You will see:
 - balance / tariff / direct numbers (loaded via the `/s/zadarma/info` endpoint)
 - a **DID dropdown** — pick the number outbound SMS should be sent from
+- an **SMS Sender ID** field — optional alphanumeric sender name instead of the raw DID
 - a **Transcript** checkbox
 - a **Cabinet timezone** field with IANA-tz autocomplete — must match the timezone shown in your Zadarma cabinet UI; the app uses it to convert webhook `call_start` strings to UTC and handles DST automatically. Leave blank only if you do not record live call timestamps.
 - both **webhook URLs** with Copy + Test buttons

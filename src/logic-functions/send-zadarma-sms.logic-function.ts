@@ -14,6 +14,7 @@ import {
 import { normalizePhone } from 'src/modules/zadarma/utils/normalize-phone';
 import { parseRetryAfter } from 'src/modules/zadarma/utils/parse-retry-after';
 import { parseSmsAnalyticsTags } from 'src/modules/zadarma/utils/parse-sms-analytics-tags';
+import { resolveSmsCallerId } from 'src/modules/zadarma/utils/resolve-sms-caller-id';
 import { updateLastContactedIfNewer } from 'src/modules/zadarma/utils/update-last-contacted';
 
 type SendSmsRequest = {
@@ -156,12 +157,22 @@ const innerHandler = async (
     return { ok: false, error: 'configuration error: Zadarma credentials missing' };
   }
 
+  // caller_id: defaults to the raw DID (ourNumber, current behaviour). If a
+  // Sender ID is configured (Zadarma cabinet → SMS → Sender ID, e.g.
+  // "Hyalual"), it's sent instead so recipients see the registered brand
+  // name. `ourNumber` itself is untouched — it still gets stored on the
+  // smsLog row for Person-matching/threading, independent of what caller_id
+  // Zadarma actually used on the wire.
+  const smsSenderId = process.env.ZADARMA_SMS_SENDER_ID;
+  const callerId = resolveSmsCallerId(smsSenderId, ourNumber);
+  debug.push(`[caller-id] senderId=${smsSenderId || '(unset)'} callerId=${callerId}`);
+
   const signed = signZadarmaRequest({
     method: '/v1/sms/send/',
     params: {
       number,
       message,
-      caller_id: ourNumber,
+      caller_id: callerId,
       ...(body.language ? { language: body.language } : {}),
     },
     userKey,

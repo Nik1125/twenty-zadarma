@@ -23,6 +23,7 @@ import {
   ZADARMA_SECRET_VARIABLE_UNIVERSAL_IDENTIFIER,
   ZADARMA_TRANSCRIPT_ENABLED_VARIABLE_UNIVERSAL_IDENTIFIER,
   ZADARMA_INBOX_SOUND_VARIABLE_UNIVERSAL_IDENTIFIER,
+  ZADARMA_SMS_SENDER_ID_VARIABLE_UNIVERSAL_IDENTIFIER,
   ZADARMA_USER_KEY_VARIABLE_UNIVERSAL_IDENTIFIER,
 } from 'src/constants/universal-identifiers';
 
@@ -199,6 +200,22 @@ export default defineApplication({
       universalIdentifier: TEAMSALE_BASE_URL_VARIABLE_UNIVERSAL_IDENTIFIER,
       description:
         '[Manage in Custom tab] Subdomain prefix for your TeamSale (Zadarma CRM) workspace, e.g. "https://yourco.teamsale.com". Empty = TeamSale-sync disabled.',
+      value: '',
+    },
+    // Optional pre-approved alphanumeric Sender ID (Zadarma cabinet → SMS →
+    // Sender ID, the same list shown in the "Od kogo" dropdown when sending
+    // SMS manually from the cabinet, e.g. "Hyalual"). When set, outbound SMS
+    // sent via /zadarma/send-sms show this name instead of the raw DID as
+    // the sender. Empty = current behaviour (numeric caller_id = the DID) —
+    // clearing this field is the rollback if the Sender ID ever misbehaves
+    // (e.g. rejected by a destination carrier that disallows alphanumeric
+    // senders). Must exactly match a Sender ID already approved in Zadarma;
+    // an unapproved value fails the send (smsLog row is written with
+    // status=FAILED and Zadarma's error message, nothing crashes).
+    ZADARMA_SMS_SENDER_ID: {
+      universalIdentifier: ZADARMA_SMS_SENDER_ID_VARIABLE_UNIVERSAL_IDENTIFIER,
+      description:
+        '[Manage in Custom tab] Pre-approved alphanumeric Sender ID from your Zadarma cabinet (SMS → Sender ID), e.g. "Hyalual". Shown as the SMS sender instead of the raw DID. Empty = send from the phone number (default, safe fallback).',
       value: '',
     },
   },
