@@ -985,6 +985,10 @@ const ZadarmaSettings = () => {
           (SMS → Sender ID — same list as the &quot;Od kogo&quot; dropdown when sending manually).
           When set, outbound SMS show this name instead of the raw DID. Leave empty (or clear it)
           to instantly revert to sending from the phone number — the safe default.
+          <br />
+          <strong>⚠️ One-way only:</strong> recipients cannot reply to an alphanumeric sender
+          (same limitation as &quot;TeamSale&quot;) — use only for notifications where no reply
+          is expected. Leave empty if the conversation needs to be two-way.
         </div>
 
         <div style={row}>

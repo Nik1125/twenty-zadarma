@@ -212,10 +212,18 @@ export default defineApplication({
     // senders). Must exactly match a Sender ID already approved in Zadarma;
     // an unapproved value fails the send (smsLog row is written with
     // status=FAILED and Zadarma's error message, nothing crashes).
+    //
+    // ⚠️ ONE-WAY ONLY: like any alphanumeric Sender ID on any SMS network,
+    // "Hyalual" is not a real phone number — recipients CANNOT reply to it.
+    // A reply sent to an alphanumeric sender is undeliverable/dropped by the
+    // carrier, same as replying to "TeamSale" or any other registered brand
+    // name. Only use this for one-way notifications (confirmations, reminders)
+    // where no reply is expected. If two-way SMS conversation matters for a
+    // given message, leave this empty so the numeric DID (repliable) is used.
     ZADARMA_SMS_SENDER_ID: {
       universalIdentifier: ZADARMA_SMS_SENDER_ID_VARIABLE_UNIVERSAL_IDENTIFIER,
       description:
-        '[Manage in Custom tab] Pre-approved alphanumeric Sender ID from your Zadarma cabinet (SMS → Sender ID), e.g. "Hyalual". Shown as the SMS sender instead of the raw DID. Empty = send from the phone number (default, safe fallback).',
+        '[Manage in Custom tab] Pre-approved alphanumeric Sender ID from your Zadarma cabinet (SMS → Sender ID), e.g. "Hyalual". Shown as the SMS sender instead of the raw DID. ⚠️ One-way only — recipients cannot reply to an alphanumeric sender (same as "TeamSale"). Empty = send from the phone number (default, repliable).',
       value: '',
     },
   },

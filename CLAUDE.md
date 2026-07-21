@@ -21,6 +21,7 @@ CLAUDE.md is a guiding star, not the source of truth. Each row below points to t
 | Bulk-export Zadarma calls + SMS into canonical CSV | skill `zadarma-bulk-export` |
 | Publishing this App as a public OS release | skill `twenty-app-publishing` |
 | Object schemas (`callLog`, `smsLog`) | `src/objects/*.object.ts` |
+| Install/upgrade failures (`BUILDER_INTERNAL_SERVER_ERROR`, `FlatEntityMapsException`) | `docs/MIGRATIONS.md` |
 | Upstream Twenty reference apps | `../twenty-apps-reference/` (sibling, not in project root — Twenty CLI scans the whole project) |
 
 ## Critical facts (load these first)
