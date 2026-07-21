@@ -80,6 +80,10 @@ const ZadarmaSettings = () => {
   // Operators normally toggle this through the checkbox widget below;
   // the free-text fallback shows up only when info.numbers is empty.
   const [zadarmaDids, setZadarmaDids] = useState<string>('');
+  // Optional alphanumeric Sender ID (Zadarma cabinet → SMS → Sender ID, e.g.
+  // "Hyalual") shown as the SMS sender instead of the raw DID. Empty = send
+  // from the phone number (current/default behaviour).
+  const [smsSenderId, setSmsSenderId] = useState<string>('');
   const [transcriptEnabled, setTranscriptEnabled] = useState<boolean>(true);
   const [inboxSound, setInboxSound] = useState<boolean>(true);
   const [cabinetTimezone, setCabinetTimezone] = useState<string>('');
@@ -212,6 +216,7 @@ const ZadarmaSettings = () => {
       if (app?.id) setAppId(app.id);
       const vars = app?.applicationVariables ?? [];
       const dids = vars.find((v) => v.key === 'ZADARMA_DIDS')?.value ?? '';
+      const senderId = vars.find((v) => v.key === 'ZADARMA_SMS_SENDER_ID')?.value ?? '';
       const tr = (vars.find((v) => v.key === 'ZADARMA_TRANSCRIPT_ENABLED')?.value ?? 'true').toLowerCase();
       const snd = (vars.find((v) => v.key === 'ZADARMA_INBOX_SOUND')?.value ?? 'true').toLowerCase();
       const tz = vars.find((v) => v.key === 'ZADARMA_CABINET_TIMEZONE')?.value ?? '';
@@ -222,6 +227,7 @@ const ZadarmaSettings = () => {
       const tsUrl = vars.find((v) => v.key === 'TEAMSALE_BASE_URL')?.value ?? '';
       const acpRaw = (vars.find((v) => v.key === 'ZADARMA_AUTO_CREATE_PERSON')?.value ?? 'false').toLowerCase();
       setZadarmaDids(dids);
+      setSmsSenderId(senderId);
       setTranscriptEnabled(tr !== 'false' && tr !== '0');
       setInboxSound(snd !== 'false' && snd !== '0');
       setCabinetTimezone(tz);
@@ -958,6 +964,28 @@ const ZadarmaSettings = () => {
             </>
           );
         })()}
+
+        <div style={row}>
+          <span style={labelCol}>SMS Sender ID</span>
+          <input
+            type="text"
+            value={smsSenderId}
+            placeholder="e.g. Hyalual (leave empty to send from the phone number)"
+            onChange={(e: { detail?: { value?: string } }) => setSmsSenderId(e.detail?.value ?? '')}
+            onBlur={() => updateAppVar('ZADARMA_SMS_SENDER_ID', smsSenderId.trim())}
+            disabled={!appId || savingVar === 'ZADARMA_SMS_SENDER_ID'}
+            style={{ flex: 1, padding: '4px 8px', fontSize: 12, fontFamily: 'inherit' }}
+          />
+          {savingVar === 'ZADARMA_SMS_SENDER_ID' && (
+            <span style={{ fontSize: 11, color: 'var(--t-font-color-secondary)', marginLeft: 8 }}>saving…</span>
+          )}
+        </div>
+        <div style={{ ...sectionHelp, marginLeft: 200 }}>
+          Optional. Must exactly match a Sender ID already approved in your Zadarma cabinet
+          (SMS → Sender ID — same list as the &quot;Od kogo&quot; dropdown when sending manually).
+          When set, outbound SMS show this name instead of the raw DID. Leave empty (or clear it)
+          to instantly revert to sending from the phone number — the safe default.
+        </div>
 
         <div style={row}>
           <span style={labelCol}>Save transcripts</span>
